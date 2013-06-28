@@ -240,7 +240,7 @@ class IngestObjectMetadataForm {
       $form_state['storage']['xml'] = TRUE;
       return $this->createPageOne($collection_pid, $collection_label, $form_state);
     }
-    else if ($form_state['storage']['xml']) {
+    elseif ($form_state['storage']['xml']) {
       return $this->createPageTwo($collection_pid, $collection_label, $form_state);
     }
     else {
@@ -286,34 +286,15 @@ class IngestObjectMetadataForm {
     $form_name = $form_state['values']['forms'];
     $should_redirect = TRUE;
 
-    $relationship = NULL;
-    $pid = NULL;
-
-    @$collection_policy = CollectionPolicy::loadFromCollection($collection_pid);
-    if ($collection_policy !== FALSE) { //Collection policy exists; use it!
-      $relationship = $collection_policy->getRelationship();
-      $pid = $collection_policy->getNextPid($content_model_dsid, $content_model_pid);
-    }
-
-    if (empty($pid)) { //No PID yet, try to get it some other way...
-      if (!empty($form_state['storage']['pid_namespace'])) {
-        module_load_include('inc', 'fedora_repository', 'api/fedora_item');
-        $pid = Fedora_Item::get_next_PID_in_namespace($form_state['storage']['pid_namespace']);
-      }
-    }
-
-    if (empty($relationship)) {
-      if (!empty($form_state['storage']['parent_relation'])) {
-        $relationship = $form_state['storage']['parent_relation'];
-      }
-    }
-
+    module_load_include('inc', 'fedora_repository', 'api/fedora_item');
+    $pid = Fedora_Item::get_next_PID_in_namespace('si');
+    $relationship = 'isMemberOfCollection';
     if (!empty($relationship) && !empty($pid)) {
       module_load_include('inc', 'islandora_content_model_forms', 'FOXML');
       $label_field = islandora_content_model_get_title_field($content_model_pid, $form_name);
       eval('$label = $form_state[\'values\']' . $label_field . ';'); //FIXME:  This doesn't really work in many cases (building the title from multiple fields, as for a person's last and first name fields.  Also:
       //FIXME:  'eval' is terrible... Get rid of it!
-      if(empty($label)) {
+      if (empty($label)) {
         $label = "Undefined";
       }
       if (empty($form['#post']['active-toggle'])) {
