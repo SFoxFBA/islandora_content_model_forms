@@ -85,12 +85,17 @@ class EditObjectMetadataForm {
    * @return array
    */
   public function createPageTwo($pid, $client, array &$form_state) {
+    //print strftime('%c');
+    //echo '====PAGE TWO INFO=====1';
+    //echo "pid:$pid  ";
+    //var_dump($form_state);
+    //echo '====PAGE TWO INFO=====2';
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
     $item = new Fedora_Item($pid);
     $content_model = ContentModel::loadFromObject($pid);
     $content_model_pid = $content_model->pid;
     $form_name = $form_state['values']['forms'];
-
+    //echo '<br>About to call with:'.$content_model->pid.' and '.$form_name;
     $dsid = islandora_content_model_get_dsid($content_model->pid, $form_name);
     $xml = NULL;
     if (array_key_exists($dsid, $item->datastreams)) {
@@ -114,6 +119,9 @@ class EditObjectMetadataForm {
       '#type' => 'hidden',
       '#value' => isset($form_state['values']['dsid']) ? $form_state['values']['dsid'] : $dsid,
     );
+    //echo '=============RETURNING FORM===========1';
+    //var_dump($form);
+    //echo '=============RETURNING FORM===========2';
     return $form;
   }
 

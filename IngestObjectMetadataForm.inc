@@ -24,15 +24,18 @@ class IngestObjectMetadataForm {
    * @return array
    */
   public function getPotentialContentModels($collection_pid, array &$form_state) {
+    watchdog("BBB_IngestObjectMetadataForm","gpcm");
     $potential_models = array();
 
     //Add models from collection policy.
     if (($collection_policy = CollectionPolicy::loadFromCollection($collection_pid)) !== FALSE && ($content_models = $collection_policy->getContentModels())) {
+    watchdog("BBB_IngestObjectMetadataForm","gpcm2");
       $potential_models = array();
       foreach ($content_models as $content_model) {
         $identifier = $content_model->getIdentifier();
         $name = $content_model->name;
         $potential_models["$identifier"] = "$name";
+    watchdog("BBB_IngestObjectMetadataForm","gpcm name:$name");
       }
     }
 
@@ -102,7 +105,7 @@ class IngestObjectMetadataForm {
       '#type' => 'fieldset',
       '#attributes' => array('class' => 'fedora_ingester'),
       '#id' => 'fedora_ingest_fieldset',
-      '#title' => t('Ingest digital object into %collection_label (@collection_pid), Step #1:', array('@collection_pid' => $collection_pid, '%collection_label' => $collection_label)),
+      '#title' => t('Ingest digital object into %collection_label (@collection_pid):', array('@collection_pid' => $collection_pid, '%collection_label' => $collection_label)),
     );
 
     $form['indicator']['models'] = array(
@@ -152,6 +155,17 @@ class IngestObjectMetadataForm {
   }
 
   /**
+   * Removes all required fields
+   */
+public function _islandora_content_model_forms_remove_required(&$element) {
+  $element['#required'] = FALSE;
+
+  foreach (element_children($element) as $key) {
+    $this->_islandora_content_model_forms_remove_required($element[$key]);
+  }
+}
+
+  /**
    * Create the second page of the Ingest Object Metadata form.
    *
    * @param string $collection_pid
@@ -161,6 +175,98 @@ class IngestObjectMetadataForm {
    * @return array
    */
   public function createPageTwo($collection_pid, $collection_label, array &$form_state) {
+    watchdog("BBB_IngestObjectMetadataForm","cpt");
+    module_load_include('inc', 'fedora_repository', 'formClass');
+    $path = drupal_get_path('module', 'islandora_content_model_forms');
+    $content_model_pid = ContentModel::getPidFromIdentifier($form_state['values']['models']);
+    $content_model_dsid = ContentModel::getDSIDFromIdentifier($form_state['values']['models']);
+
+    $form_name = NULL;
+    if (isset($form_state['values']['forms'])) {
+      $form_name = $form_state['values']['forms'];
+    }
+    else {
+      watchdog("BBB_IngestObjectMetadataForm","cpt $content_model_pid");
+      $form_names = islandora_content_model_get_form_names($content_model_pid);
+      reset($form_names);
+      $form_name = key($form_names);
+      $form_state['values']['forms'] = $form_name;
+    }
+    if (empty($form_name)) {
+      $ingestForm = new formClass();
+      $form_state['storage']['content_model'] = $content_model;
+      $form_state['storage']['collection_pid'] = $collection_pid;
+      watchdog("BBB_IngestObjectMetadataForm","empty form name $content_model and $collection_pid--");
+      return $ingestForm->createQDCIngestForm($collection_pid, $collection_label, $form_state);
+    }
+    $dsid = islandora_content_model_get_dsid($content_model_pid, $form_state['values']['forms']);
+
+    $xml = NULL;
+    if (!empty($form_state['storage']['xml_data'])) {
+      $xml = $form_state['storage']['xml_data'];
+    }
+
+    $form = xml_form_builder_get_form($form_state, $form_name, $xml);
+    if ($_POST['wizard_check'] == TRUE || $_POST['models']=='si:generalImageCModel/ISLANDORACM'){ //PDFs have no required, images do
+      watchdog("BBB_IngestObjectMetadataForm","removing required checks for wizard:$form_name --");
+      $this->_islandora_content_model_forms_remove_required($form);
+    }
+      watchdog("BBB_IngestObjectMetadataForm","adding wiz_bab:$form_name --");
+    $form['wiz_bab'] = array(
+      '#type' => 'hidden',
+      '#value' => 'ringring',
+    );
+    $form['collection_pid'] = array(
+      '#type' => 'hidden',
+      '#value' => $collection_pid
+    );
+    $form['content_model_pid'] = array(
+      '#type' => 'hidden',
+      '#value' => $content_model_pid
+    );
+    $form['content_model_dsid'] = array(
+      '#type' => 'hidden',
+      '#value' => $content_model_dsid
+    );
+    $form['dsid'] = array(
+      '#type' => 'hidden',
+      '#value' => $dsid
+    );
+    $form['models'] = array(
+      '#type' => 'hidden',
+      '#value' => $form_state['values']['models']
+    );
+    $form['forms'] = array(
+      '#type' => 'hidden',
+      '#value' => $form_state['values']['forms']
+    );
+    $form['submit'] = array(
+      '#type' => 'submit',
+      '#attributes' => array('class' => 'fedora_ingest_page_two_submit'),
+      '#submit' => array('fedora_repository_ingest_form_submit'),
+      '#value' => t('Submit'),
+    );
+   ob_start();
+   var_dump($form);
+   $result = ob_get_clean();
+   watchdog("BBB_IngestObjectMetadataForm","imcf cpt form:".$result);
+
+ 
+    return $form;
+  }
+
+  /**
+   * Create the second page of the Ingest Object Metadata form.
+   *
+   * @param string $collection_pid
+   * @param string $collection_label
+   * @param array $form_state
+   *
+   * @return array
+   */
+
+  public function createPageThree($collection_pid, $collection_label, array &$form_state) {
+    watchdog("BBB_IngestObjectMetadataForm","cp3");
     module_load_include('inc', 'fedora_repository', 'formClass');
     $path = drupal_get_path('module', 'islandora_content_model_forms');
     $content_model_pid = ContentModel::getPidFromIdentifier($form_state['values']['models']);
@@ -234,16 +340,19 @@ class IngestObjectMetadataForm {
    * @return array
    */
   public function create($collection_pid, $collection_label, array &$form_state) {
+    watchdog("BBB_IngestObjectMetadataForm","iomf create: $collection_pid, $collection_label--");
     $page = $form_state['storage']['step'] = empty($form_state['storage']['step']) ? 1 : $form_state['storage']['step'];
+    watchdog("BBB_IngestObjectMetadataForm","iomf create page: $page--");
 
     if ($page == 1) {
-      $form_state['storage']['xml'] = TRUE;
-      return $this->createPageOne($collection_pid, $collection_label, $form_state);
-    }
-    elseif ($form_state['storage']['xml']) {
-      return $this->createPageTwo($collection_pid, $collection_label, $form_state);
-    }
-    else {
+        watchdog("BBB_IngestObjectMetadataForm","iomf create page1: $collection_pid, $collection_label--");
+    	$form_state['storage']['xml'] = TRUE;
+    	return $this->createPageOne($collection_pid, $collection_label, $form_state);
+    } elseif ($form_state['storage']['xml']) {
+        watchdog("BBB_IngestObjectMetadataForm","iomf create page2: $collection_pid, $collection_label--");
+	return $this->createPageTwo($collection_pid, $collection_label, $form_state);
+    } else {
+      watchdog("BBB_IngestObjectMetadataForm","iomf throwing exception: $collection_pid, $collection_label--");
       throw new Exception("Couldn't Create the Ingest Form.");
     }
   }
