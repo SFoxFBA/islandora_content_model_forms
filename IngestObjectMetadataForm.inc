@@ -207,7 +207,8 @@ public function _islandora_content_model_forms_remove_required(&$element) {
     }
 
     $form = xml_form_builder_get_form($form_state, $form_name, $xml);
-    if ($_POST['wizard_check'] == TRUE || $_POST['models']=='si:generalImageCModel/ISLANDORACM'){ //PDFs have no required, images do
+    //if ($_POST['wizard_check'] == TRUE || $_POST['models']=='si:generalImageCModel/ISLANDORACM'){ //PDFs have no required, images do
+    if (true){
       watchdog("BBB_IngestObjectMetadataForm","removing required checks for wizard:$form_name --");
       $this->_islandora_content_model_forms_remove_required($form);
     }
@@ -401,6 +402,7 @@ public function _islandora_content_model_forms_remove_required(&$element) {
     if (!empty($relationship) && !empty($pid)) {
       module_load_include('inc', 'islandora_content_model_forms', 'FOXML');
       $label_field = islandora_content_model_get_title_field($content_model_pid, $form_name);
+      watchdog("BBB_IngestObjectMetadataForm","lf: $label_field cmp: $content_model_pid fn: $form_name");
       eval('$label = $form_state[\'values\']' . $label_field . ';'); //FIXME:  This doesn't really work in many cases (building the title from multiple fields, as for a person's last and first name fields.  Also:
       //FIXME:  'eval' is terrible... Get rid of it!
       if (empty($label)) {
