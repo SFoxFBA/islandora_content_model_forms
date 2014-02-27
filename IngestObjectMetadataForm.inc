@@ -138,7 +138,7 @@ class IngestObjectMetadataForm {
         '#type' => 'select',
         '#title' => t('Select form'),
         '#options' => $form_names,
-        '#description' => t('Select the form to populate the metadata of the new object.'),
+        '#description' => t('Select the form to populate the metadata of the new object!'),
       );
     }
 
