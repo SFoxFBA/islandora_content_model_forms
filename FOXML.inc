@@ -51,12 +51,6 @@ class FOXML extends DOMDocument {
     parent::__construct("1.0", "UTF-8"); // DomDocument
     $this->formatOutput = TRUE;
     $this->preserveWhiteSpace = FALSE;
-  ob_start();
-  var_dump($label);
-  debugUtils::callStack(debug_backtrace());
-  $result = ob_get_clean();
-  watchdog("BBB_icmvf_FOXML:", "label:".$result."---");
-
     $this->label = substr($label, 0, 256);
     $this->user = $user->name;
     $this->pid = $pid;
