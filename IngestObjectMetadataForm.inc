@@ -152,6 +152,17 @@ class IngestObjectMetadataForm {
   }
 
   /**
+   * Removes all required fields
+   */
+public function _islandora_content_model_forms_remove_required(&$element) {
+  $element['#required'] = FALSE;
+
+  foreach (element_children($element) as $key) {
+    $this->_islandora_content_model_forms_remove_required($element[$key]);
+  }
+}
+
+  /**
    * Create the second page of the Ingest Object Metadata form.
    *
    * @param string $collection_pid
@@ -161,6 +172,85 @@ class IngestObjectMetadataForm {
    * @return array
    */
   public function createPageTwo($collection_pid, $collection_label, array &$form_state) {
+    module_load_include('inc', 'fedora_repository', 'formClass');
+    $path = drupal_get_path('module', 'islandora_content_model_forms');
+    $content_model_pid = ContentModel::getPidFromIdentifier($form_state['values']['models']);
+    $content_model_dsid = ContentModel::getDSIDFromIdentifier($form_state['values']['models']);
+
+    $form_name = NULL;
+    if (isset($form_state['values']['forms'])) {
+      $form_name = $form_state['values']['forms'];
+    }
+    else {
+      $form_names = islandora_content_model_get_form_names($content_model_pid);
+      reset($form_names);
+      $form_name = key($form_names);
+      $form_state['values']['forms'] = $form_name;
+    }
+    if (empty($form_name)) {
+      $ingestForm = new formClass();
+      $form_state['storage']['content_model'] = $content_model;
+      $form_state['storage']['collection_pid'] = $collection_pid;
+      return $ingestForm->createQDCIngestForm($collection_pid, $collection_label, $form_state);
+    }
+    $dsid = islandora_content_model_get_dsid($content_model_pid, $form_state['values']['forms']);
+
+    $xml = NULL;
+    if (!empty($form_state['storage']['xml_data'])) {
+      $xml = $form_state['storage']['xml_data'];
+    }
+
+    $form = xml_form_builder_get_form($form_state, $form_name, $xml);
+    $this->_islandora_content_model_forms_remove_required($form);
+    $form['collection_pid'] = array(
+      '#type' => 'hidden',
+      '#value' => $collection_pid
+    );
+    $form['content_model_pid'] = array(
+      '#type' => 'hidden',
+      '#value' => $content_model_pid
+    );
+    $form['content_model_dsid'] = array(
+      '#type' => 'hidden',
+      '#value' => $content_model_dsid
+    );
+    $form['dsid'] = array(
+      '#type' => 'hidden',
+      '#value' => $dsid
+    );
+    $form['models'] = array(
+      '#type' => 'hidden',
+      '#value' => $form_state['values']['models']
+    );
+    $form['forms'] = array(
+      '#type' => 'hidden',
+      '#value' => $form_state['values']['forms']
+    );
+    $form['submit'] = array(
+      '#type' => 'submit',
+      '#attributes' => array('class' => 'fedora_ingest_page_two_submit'),
+      '#submit' => array('fedora_repository_ingest_form_submit'),
+      '#value' => t('Submit'),
+    );
+   ob_start();
+   var_dump($form);
+   $result = ob_get_clean();
+
+ 
+    return $form;
+  }
+
+  /**
+   * Create the second page of the Ingest Object Metadata form.
+   *
+   * @param string $collection_pid
+   * @param string $collection_label
+   * @param array $form_state
+   *
+   * @return array
+   */
+
+  public function createPageThree($collection_pid, $collection_label, array &$form_state) {
     module_load_include('inc', 'fedora_repository', 'formClass');
     $path = drupal_get_path('module', 'islandora_content_model_forms');
     $content_model_pid = ContentModel::getPidFromIdentifier($form_state['values']['models']);
@@ -235,15 +325,12 @@ class IngestObjectMetadataForm {
    */
   public function create($collection_pid, $collection_label, array &$form_state) {
     $page = $form_state['storage']['step'] = empty($form_state['storage']['step']) ? 1 : $form_state['storage']['step'];
-
     if ($page == 1) {
-      $form_state['storage']['xml'] = TRUE;
-      return $this->createPageOne($collection_pid, $collection_label, $form_state);
-    }
-    elseif ($form_state['storage']['xml']) {
-      return $this->createPageTwo($collection_pid, $collection_label, $form_state);
-    }
-    else {
+    	$form_state['storage']['xml'] = TRUE;
+    	return $this->createPageOne($collection_pid, $collection_label, $form_state);
+    } elseif ($form_state['storage']['xml']) {
+	return $this->createPageTwo($collection_pid, $collection_label, $form_state);
+    } else {
       throw new Exception("Couldn't Create the Ingest Form.");
     }
   }
