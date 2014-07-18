@@ -164,8 +164,32 @@ class EditObjectMetadataForm {
     $form_name = $form_state['values']['forms'];
     $content_model_pid = $form_state['values']['content_model_pid'];
     $label_field = islandora_content_model_get_title_field($content_model_pid, $form_name);
-    eval('$label = $form_state[\'values\']' . $label_field . ';');
-    if(empty($label)) {
+    //SFOX hacked code to get this working
+    $exploded_label_field = explode('[', $label_field);
+    foreach ($exploded_label_field as $elf_key => $elf_value) {
+      if ($elf_value) {
+        $label_field_text = trim($elf_value, ']');
+        $label_field_text = str_replace("'", "", $label_field_text);
+        if ($subarray) {
+          if (array_key_exists($label_field_text, $subarray)) {
+              $subarray = $subarray[$label_field_text];
+          }
+        }
+        else {
+          if (array_key_exists($label_field_text, $form_state['values'])) {
+            $subarray = $form_state['values'][$label_field_text];
+          }
+          else {
+            //not worth trying to drill down any further
+            break;
+          }
+        }
+      }
+    }
+    $label = $subarray;
+    //SFOX
+    //eval('$label = $form_state[\'values\']' . $label_field . ';');
+    if (empty($label)) {
       $label = "Undefined";
     }
     $this->setObjectLabel($pid, $label);
@@ -187,7 +211,24 @@ class EditObjectMetadataForm {
     $xml_form = new XMLForm($form_state);
     $doc = $xml_form->submit($form, $form_state);
     $document = $doc->document;
+
+   /**
+    *
+    * FBA MODIFICATION BY NBYWELL on 06/03/2014. Check the content of the
+    * 'rdf_relationships' variable which triggers
+    * the Object Linker functionality.
+    *
+    */
+
+    if (variable_get('rdf_relationships', NULL)) {
+      module_load_include('inc', 'islandora_content_model_forms', 'FOXML');
+      module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
+      process_link_data($document);
+    }
     $this->modifyDatastream($document, $pid, $dsid, "$dsid Record", 'text/xml');
+    if (variable_get('rdf_relationships', NULL)) {
+      process_links($form,$form_state,true);
+    }
     return $document;
   }
 

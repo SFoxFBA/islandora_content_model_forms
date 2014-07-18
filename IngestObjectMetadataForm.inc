@@ -367,19 +367,67 @@ public function _islandora_content_model_forms_remove_required(&$element) {
     }
 
     $collection_pid = $form_state['values']['collection_pid'];
-    $content_model_pid = $form_state['values']['content_model_pid'];
+    $content_model_pid = $form_state['values']['content_model_pid']; //SFOX use this to create namespace for new object
     $content_model_dsid = $form_state['values']['content_model_dsid'];
     $dsid = $form_state['values']['dsid'];
     $form_name = $form_state['values']['forms'];
     $should_redirect = TRUE;
 
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
-    $pid = Fedora_Item::get_next_PID_in_namespace('si');
+    //SFOX we're not using the si namespace, so have added fba cmodels
+    //horribly hard coded, need to extract this from the cmodel ideally
+    switch ($content_model_pid) {
+      case 'fba:activity_cmodel': {
+          $pidnamespace = 'fba-activity';
+          break;
+        }
+      case 'fba:measurement_cmodel': {
+          $pidnamespace = 'fba-measurement';
+          break;
+        }
+      case 'fba:dataset_cmodel': {
+          $pidnamespace = 'fba-dataset';
+          break;
+        }
+      case 'fba:analysis_cmodel': {
+          $pidnamespace = 'fba-analysis';
+          break;
+        }
+      default: {
+          $pidnamespace = 'si';
+        }
+    }
+    $pid = Fedora_Item::get_next_PID_in_namespace($pidnamespace);
     $relationship = 'isMemberOfCollection';
+
     if (!empty($relationship) && !empty($pid)) {
       module_load_include('inc', 'islandora_content_model_forms', 'FOXML');
       $label_field = islandora_content_model_get_title_field($content_model_pid, $form_name);
-      eval('$label = $form_state[\'values\']' . $label_field . ';'); //FIXME:  This doesn't really work in many cases (building the title from multiple fields, as for a person's last and first name fields.  Also:
+      //SFOX hacked code to get this working
+      $exploded_label_field = explode('[', $label_field);
+      foreach ($exploded_label_field as $elf_key => $elf_value) {
+        if ($elf_value) {
+          $label_field_text = trim($elf_value, ']');
+          $label_field_text = str_replace("'", "", $label_field_text);
+          if ($subarray) {
+            if (array_key_exists($label_field_text, $subarray)) {
+              $subarray = $subarray[$label_field_text];
+            }
+          }
+          else {
+            if (array_key_exists($label_field_text, $form_state['values'])) {
+              $subarray = $form_state['values'][$label_field_text];
+            }
+            else {
+              //not worth trying to drill down any further
+              break;
+            }
+          }
+        }
+      }
+      $label = $subarray;
+      //SFOX
+//      eval('$label = $form_state[\'values\']' . $label_field . ';'); //FIXME:  This doesn't really work in many cases (building the title from multiple fields, as for a person's last and first name fields.  Also:
       //FIXME:  'eval' is terrible... Get rid of it!
       if (empty($label)) {
         $label = "Undefined";
@@ -418,8 +466,24 @@ public function _islandora_content_model_forms_remove_required(&$element) {
 
       $transform = islandora_content_model_get_transform($content_model_pid, $form_name);
 
+      /**
+      *
+      * FBA MODIFICATION BY NBYWELL on 06/03/2014. Check content of
+      * the 'rdf_relationships' variable which triggers the
+      * Object Linker functionality.
+      *
+      */
+
+      if (variable_get('rdf_relationships', NULL)) {
+        module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
+        process_link_data($document);
+      }
       $foxml = new FOXML($label, $pid, $dsid, $content_model_pid, $collection_pid, $relationship, $ingest_file_location, $document, $transform, $state);
       $foxml->ingest();
+
+      if (variable_get('rdf_relationships', NULL)) {
+        process_links($form,$form_state, false);
+      }
       $_SESSION['fedora_ingest_files'] = '';
       $form_state['storage'] = NULL;
     }
