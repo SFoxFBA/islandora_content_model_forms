@@ -120,8 +120,10 @@ function islandora_content_model_forms_get_transform_name($path) {
     return $transforms[$path];
   }
   else {
-    drupal_set_message(t('Transform not specified in hook?: %path', array('%path' => $path)), 'error');
-    return $path;
+    if ($path) {
+      drupal_set_message(t('Transform not specified in hook?: %path', array('%path' => $path)), 'error');
+      return $path;
+    }
   }
 }
 
@@ -328,6 +330,9 @@ function islandora_content_model_forms_get_form_names() {
 }
 
 function islandora_content_model_forms_get_transforms() {
+  $returnVals = array('None');
+  $returnVals += module_invoke_all('islandora_content_model_forms_get_transforms');
+  return $returnVals;
   return module_invoke_all('islandora_content_model_forms_get_transforms');
 }
 
@@ -367,7 +372,12 @@ function islandora_content_model_forms_autocomplete($string) {
     }
   }
   $output[$string] = $string;
-  return drupal_json($output);
+  // We forego the usuage of drupal_json as this sets a header which causes
+  // IE to prompt for downloads. Instead we use the header set in 
+  // _drupal_bootstrup_full which sets the Content Type of 'text/html'.
+  // Relevant threads: http://drupal.org/node/952220, 
+  // http://drupal.org/node/1086098
+  echo drupal_to_js($output);
 }
 
 /**
@@ -394,7 +404,12 @@ function islandora_content_model_get_form_names($content_model) {
  */
 function islandora_content_model_get_form_names_ahah($content_model) {
   $list = islandora_content_model_get_form_names($content_model);
-  return drupal_json($list);
+  // We forego the usuage of drupal_json as this sets a header which causes
+  // IE to prompt for downloads. Instead we use the header set in 
+  // _drupal_bootstrup_full which sets the Content Type of 'text/html'.
+  // Relevant threads: http://drupal.org/node/952220, 
+  // http://drupal.org/node/1086098
+  echo drupal_to_js($list);
 }
 
 /**
@@ -470,25 +485,25 @@ function islandora_content_model_get_transform($content_model_pid, $form_name) {
   $result = db_query("SELECT transform FROM {islandora_content_model_forms} where content_model = '%s' AND form_name = '%s'", $content_model_pid, $form_name);
   while ($data = db_fetch_object($result)) {
     if (isset($data->transform)) {
-      $xsl_file = "./{$data->transform}"; 
-    
+      $xsl_file = "./{$data->transform}";
+
       $old_transform_path = drupal_get_path('module', 'islandora_content_model_forms') . "/transforms/{$data->transform}";
       if (!file_exists($xsl_file)) {
         $xsl_file = "./$old_transform_path";
-        
+
         if (file_exists($xsl_file)) {
-          watchdog('islandora_content_model_forms', 'Found the transform "@transform" in the legacy location. Transforms ' . 
-            'should be specified by a path relative to the server\'s document root.', array(
+          watchdog('islandora_content_model_forms', 'Found the transform "@transform" in the legacy location. Transforms ' .
+              'should be specified by a path relative to the server\'s document root.', array(
             '@transform' => $data->transform,
             '@old_dir' => $old_transform_path,
-          ), WATCHDOG_WARNING);
+              ), WATCHDOG_WARNING);
         }
         else {
-          watchdog('islandora_content_model_forms', 'The XSLT transform to DC cannot be located as either "@transform"' . 
-            ' or "@old_dir"!.', array(
+          watchdog('islandora_content_model_forms', 'The XSLT transform to DC cannot be located as either "@transform"' .
+              ' or "@old_dir"!.', array(
             '@transform' => $data->transform,
             '@old_dir' => $old_transform_path,
-          ), WATCHDOG_ERROR);
+              ), WATCHDOG_ERROR);
           return NULL;
         }
       }
@@ -564,9 +579,15 @@ function islandora_content_model_forms_ahah() {
   $javascript = drupal_add_js(NULL, NULL, 'header');
   $settings = call_user_func_array('array_merge_recursive', $javascript['setting']);
   unset($settings['ahah']['']);
-  drupal_json(array(
+  // We forego the usuage of drupal_json as this sets a header which causes
+  // IE to prompt for downloads. Instead we use the header set in 
+  // _drupal_bootstrup_full which sets the Content Type of 'text/html'
+  // Relevant threads: http://drupal.org/node/952220, 
+  // http://drupal.org/node/1086098
+  $response = array(
     'status' => TRUE,
     'data' => $data,
     'settings' => $settings,
-  ));
+  );
+  echo drupal_to_js($response);
 }

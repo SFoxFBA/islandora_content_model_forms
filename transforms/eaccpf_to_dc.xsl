@@ -1,48 +1,79 @@
 <?xml version="1.0" encoding="utf-8"?>
-<xsl:stylesheet version="1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xmlns:dc="http://purl.org/dc/elements/1.1/"
-	xmlns:srw_dc="info:srw/schema/1/dc-schema"
-	xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/"
-	xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
-	xmlns:xlink="http://www.w3.org/1999/xlink"
-	xmlns:eac-cpf="urn:isbn:1-931666-33-4"
-	xmlns:eac="urn:isbn:1-931666-33-4">
+<xsl:stylesheet version="1.0"
+                xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+                xmlns:eac-cpf="urn:isbn:1-931666-33-4"
+                xmlns:oai-dc="http://www.openarchives.org/OAI/2.0/oai_dc/"
+                xmlns:dc="http://purl.org/dc/elements/1.1/"
+                exclude-result-prefixes="eac-cpf">
+    <xsl:output method="xml" indent="yes" encoding="UTF-8"/>
 
-	<xsl:output method="xml" indent="yes"/>
-	<xsl:strip-space elements="*"/>
-    <xsl:template match="/">
-        <oai_dc:dc xsi:schemaLocation="http://www.openarchives.org/OAI/2.0/oai_dc/ http://www.openarchives.org/OAI/2.0/oai_dc.xsd">
-            <xsl:apply-templates/>
-        </oai_dc:dc>
+    <xsl:template match="eac-cpf:eac-cpf">
+        <oai-dc:dc>
+            <dc:identifier>
+                <xsl:value-of select="eac-cpf:control/eac-cpf:recordId/text()"/>
+            </dc:identifier>
+            <xsl:apply-templates select="eac-cpf:cpfDescription"/>
+            
+            <dc:description>
+                <xsl:value-of select="eac-cpf:cpfDescription/eac-cpf:description/eac-cpf:biogHist/eac-cpf:p"/>
+            </dc:description>
+        
+            <xsl:for-each
+                select="eac-cpf:cpfDescription/eac-cpf:relations/eac-cpf:cpfRelation/eac-cpf:relationEntry">
+                <dc:relation>
+                    <xsl:if test="normalize-space(.)!= ''">
+                        <xsl:value-of select="."/>
+                    </xsl:if>
+                </dc:relation>
+            </xsl:for-each>
+            
+        </oai-dc:dc>
     </xsl:template>
-    
-    <xsl:template match="eac:eac-cpf">
-        <dc:identifier>
-            <xsl:value-of select="/eac:eac-cpf/eac:control/eac:recordId"/>
-        </dc:identifier>
-        
-		<dc:title>
-			<xsl:value-of select="eac:cpfDescription/eac:identity/eac:nameEntry[@localType='primary']/eac:part"/>
-		</dc:title>
-        
-        <dc:title>
-            <xsl:value-of select="eac:cpfDescription/eac:identity/eac:nameEntry[@localType='abbreviation']/eac:part"/>
-        </dc:title>
-        
-        <dc:description>
-            <xsl:value-of select="eac:cpfDescription/eac:description/eac:biogHist/eac:p"/>
-        </dc:description>
-        
-        <xsl:for-each
-            select="eac:cpfDescription/eac:relations/eac:cpfRelation/eac:relationEntry">
-        <dc:relation>
-            <xsl:if test="normalize-space(.)!= ''">
-                <xsl:value-of select="."/>
-            </xsl:if>
-        </dc:relation>
-        </xsl:for-each>
-	</xsl:template>
 
-	<!-- suppress all else:-->
-	<xsl:template match="*"/>
+    <xsl:template match="eac-cpf:entityType">
+        <dc:type>
+            <xsl:value-of select="text()"/>
+        </dc:type>
+    </xsl:template>
+
+    <xsl:template match="eac-cpf:nameEntry">
+        <xsl:choose>
+            <xsl:when test="@localType='primary'">
+                <dc:title>
+                    <xsl:call-template name="eac-cpf_name"/>
+                </dc:title>
+            </xsl:when>
+            <xsl:otherwise>
+                <dc:alternative>
+                    <xsl:call-template name="eac-cpf_name"/>
+                </dc:alternative>
+            </xsl:otherwise>
+        </xsl:choose>
+    </xsl:template>
+
+    <xsl:template name="eac-cpf_name">
+        <xsl:variable name="last_name" select="eac-cpf:part[@localType='surname']/text()"/>
+        <xsl:variable name="first_name" select="eac-cpf:part[@localType!='surname']/text()"/>
+
+        <xsl:choose>
+            <xsl:when test="$last_name and $first_name">
+                <xsl:value-of select="normalize-space(concat($last_name, ', ', $first_name))"/>
+            </xsl:when>
+            <xsl:otherwise>
+                <xsl:value-of select="normalize-space(concat($last_name, $first_name))"/>
+            </xsl:otherwise>
+        </xsl:choose>
+    </xsl:template>
+
+    <xsl:template match="eac-cpf:existDates/eac-cpf:dateRange">
+        <dc:date>
+            <xsl:value-of select="normalize-space(concat(eac-cpf:fromDate/@standardDate, '/', eac-cpf:toDate/@standardDate))"/>
+        </dc:date>
+    </xsl:template>
+
+    <xsl:template match="*">
+        <xsl:apply-templates/>
+    </xsl:template>
 </xsl:stylesheet>
+
+

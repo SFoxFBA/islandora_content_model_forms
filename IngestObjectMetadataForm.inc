@@ -36,7 +36,7 @@ class IngestObjectMetadataForm {
       }
     }
 
-    //Add cmodels to programatically include...
+    // Add cmodels to programatically include...
     if ($CMs = $form_state['storage']['content_model']) {
       $CMs = (array) $CMs;
       module_load_include('inc', 'fedora_repository', 'ContentModel');
@@ -54,19 +54,19 @@ class IngestObjectMetadataForm {
   /**
    * Create the first page of the Ingest Object Metadata form.
    *
+   * @note
+   *   this code contains a temporary fix and should be replaced as soon as a more permananent solution is developed
+   * currently if a collection has more than one content model listed in the collection policy the user
+   * will only have access to the first form associated with the content type.
+   *
    * @param string $collection_pid
    * @param string $collection_label
    * @param array $form_state
    *
    * @return array
    */
-  // this code contains a temporary fix and should be replaced as soon as a more permananent solution is developed
-  // currently if a collection has more than one content model listed in the collection policy the user
-  // will only have access to the first form associated with the content type.
-
-
   public function createPageOne($collection_pid, $collection_label, array &$form_state) {
-    //ddebug_backtrace();
+
     $potential_models = $this->getPotentialContentModels($collection_pid, $form_state);
     unset($potential_models['islandora:collectionCModel/ISLANDORACM']);
     list($identifier, $name) = array_peek($potential_models);
@@ -83,19 +83,20 @@ class IngestObjectMetadataForm {
       }
       else {
         if (module_exists('islandora_collection_manager')) {
-          $message = t('Select the %manage tab to add content models or child collections to this collection', array('%manage' => 'Manage This Collection')); //XXX: Should get the value from the collection manager?
+          // XXX: Should get the value from the collection manager?
+          $message = t('Select the %manage tab to add content models or child collections to this collection', array('%manage' => 'Manage This Collection'));
         }
         else {
           $collection_link = l("Islandora Collection Manager", "https://wiki.duraspace.org/display/ISLANDORA6121/Collection+Manager");
           $message = t('This collection requires either one or more content models in its COLLECTION_POLICY, or one or more child collections.<br />
                       We strongly recommend enabling the !collection_link module for managing collection objects.', array('!collection_link' => $collection_link));
         }
-        $form['message'] = array(
-          '#type' => 'item',
-          '#value' => $message,
-        );
-        return $form;
       }
+      $form['message'] = array(
+        '#type' => 'item',
+        '#value' => $message,
+      );
+      return $form;
     }
 
     $form['indicator'] = array(
@@ -154,13 +155,13 @@ class IngestObjectMetadataForm {
   /**
    * Removes all required fields
    */
-public function _islandora_content_model_forms_remove_required(&$element) {
-  $element['#required'] = FALSE;
+  public function _islandora_content_model_forms_remove_required(&$element) {
+    $element['#required'] = FALSE;
 
-  foreach (element_children($element) as $key) {
-    $this->_islandora_content_model_forms_remove_required($element[$key]);
+    foreach (element_children($element) as $key) {
+      $this->_islandora_content_model_forms_remove_required($element[$key]);
+    }
   }
-}
 
   /**
    * Create the second page of the Ingest Object Metadata form.
@@ -232,11 +233,11 @@ public function _islandora_content_model_forms_remove_required(&$element) {
       '#submit' => array('fedora_repository_ingest_form_submit'),
       '#value' => t('Submit'),
     );
-   ob_start();
-   var_dump($form);
-   $result = ob_get_clean();
+    ob_start();
+    var_dump($form);
+    $result = ob_get_clean();
 
- 
+
     return $form;
   }
 
@@ -249,7 +250,6 @@ public function _islandora_content_model_forms_remove_required(&$element) {
    *
    * @return array
    */
-
   public function createPageThree($collection_pid, $collection_label, array &$form_state) {
     module_load_include('inc', 'fedora_repository', 'formClass');
     $path = drupal_get_path('module', 'islandora_content_model_forms');
@@ -325,12 +325,15 @@ public function _islandora_content_model_forms_remove_required(&$element) {
    */
   public function create($collection_pid, $collection_label, array &$form_state) {
     $page = $form_state['storage']['step'] = empty($form_state['storage']['step']) ? 1 : $form_state['storage']['step'];
+
     if ($page == 1) {
-    	$form_state['storage']['xml'] = TRUE;
-    	return $this->createPageOne($collection_pid, $collection_label, $form_state);
-    } elseif ($form_state['storage']['xml']) {
-	return $this->createPageTwo($collection_pid, $collection_label, $form_state);
-    } else {
+      $form_state['storage']['xml'] = TRUE;
+      return $this->createPageOne($collection_pid, $collection_label, $form_state);
+    }
+    else if ($form_state['storage']['xml']) {
+      return $this->createPageTwo($collection_pid, $collection_label, $form_state);
+    }
+    else {
       throw new Exception("Couldn't Create the Ingest Form.");
     }
   }
@@ -367,38 +370,96 @@ public function _islandora_content_model_forms_remove_required(&$element) {
     }
 
     $collection_pid = $form_state['values']['collection_pid'];
-    $content_model_pid = $form_state['values']['content_model_pid']; //SFOX use this to create namespace for new object
+    $content_model_pid = $form_state['values']['content_model_pid'];
     $content_model_dsid = $form_state['values']['content_model_dsid'];
     $dsid = $form_state['values']['dsid'];
     $form_name = $form_state['values']['forms'];
     $should_redirect = TRUE;
 
+    $relationship = NULL;
+    $pid = NULL;
+
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
     //SFOX we're not using the si namespace, so have added fba cmodels
     //horribly hard coded, need to extract this from the cmodel ideally
     switch ($content_model_pid) {
+      //Concepts
       case 'fba:activity_cmodel': {
-          $pidnamespace = 'fba-activity';
-          break;
-        }
-      case 'fba:measurement_cmodel': {
-          $pidnamespace = 'fba-measurement';
+          $pidnamespace = 'dtcac';
           break;
         }
       case 'fba:dataset_cmodel': {
-          $pidnamespace = 'fba-dataset';
+          $pidnamespace = 'dtcds';
+          break;
+        }
+      //Resources
+      case 'fba:measurement_cmodel': {
+          $pidnamespace = 'dtcmt';
           break;
         }
       case 'fba:analysis_cmodel': {
-          $pidnamespace = 'fba-analysis';
+          $pidnamespace = 'dtcan';
+          break;
+        }
+      case 'fba:litreview_cmodel': {
+          $pidnamespace = 'dtclr';
+          break;
+        }
+      case 'fba:simulation_cmodel': {
+          $pidnamespace = 'dtcsi';
+          break;
+        }
+      case 'fba:synthesis_cmodel': {
+          $pidnamespace = 'dtcsy';
+          break;
+        }
+      //Supplementary File Resources
+      case 'fba:sp_basic_image': {
+          $pidnamespace = 'dtcim';
+          break;
+        }
+      case 'fba:sp_large_image_cmodel': {
+          $pidnamespace = 'dtcli';
+          break;
+        }
+      case 'fba:library_monograph_cmodel': {
+          $pidnamespace = 'dtclm';
+          break;
+        }
+      case 'fba:library_article_cmodel': {
+          $pidnamespace = 'dtcla';
+          break;
+        }
+      case 'fba:library_chapter_cmodel': {
+          $pidnamespace = 'dtclc';
+          break;
+        }
+      case 'fba:dtc_generic_cmodel': {
+          $pidnamespace = 'dtcgen';
           break;
         }
       default: {
-          $pidnamespace = 'si';
+          $pidnamespace = 'dtcuc'; //
         }
     }
     $pid = Fedora_Item::get_next_PID_in_namespace($pidnamespace);
     $relationship = 'isMemberOfCollection';
+
+
+    $mods_nodelist = $document->getElementsByTagName('mods');
+    if ($mods_nodelist->length > 0) {
+      $mods_element = $mods_nodelist->item(0);
+      $identifier_element = $document->createElement('identifier', $pid);
+      $identifier_element->setAttribute('type', 'local');
+      $mods_element->appendChild($identifier_element);
+    }
+
+
+    if (empty($relationship)) {
+      if (!empty($form_state['storage']['parent_relation'])) {
+        $relationship = $form_state['storage']['parent_relation'];
+      }
+    }
 
     if (!empty($relationship) && !empty($pid)) {
       module_load_include('inc', 'islandora_content_model_forms', 'FOXML');
@@ -474,22 +535,78 @@ public function _islandora_content_model_forms_remove_required(&$element) {
       *
       */
 
-      if (variable_get('rdf_relationships', NULL)) {
-        module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
-        process_link_data($document);
-      }
-      $foxml = new FOXML($label, $pid, $dsid, $content_model_pid, $collection_pid, $relationship, $ingest_file_location, $document, $transform, $state);
-      $foxml->ingest();
+      module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
+      global $user;
+      $duplicateEntryAlertRequired = false;
 
-      if (variable_get('rdf_relationships', NULL)) {
-        process_links($form,$form_state, false);
+      /**
+      *
+      * This is a check to determine if an entry already exists
+      * in the current collection for the a particular set of collections.
+      * As it is hard-coded it is debatable whether it should be included 
+      * in the publically released version of this code on GitHub.
+      */
+
+      $user_id = $user->islandora_user_pid;
+      $user_collection_ns = str_replace(array('-',':'),'', $user_id);
+      $user_collection = $user_collection_ns . ':collection';
+
+      switch ($collection_pid) {
+        // List of collections in which duplicates are not permitted.
+        case "fba:vocabpref_collection":
+        case "fba:vocabnonpref_collection":
+        case "fba:geopref_collection":
+        case "fba:geononpref_collection":
+          $sparqlQuery = 'SELECT ?title ?pid WHERE { ?pid <http://purl.org/dc/elements/1.1/title> ?title; <fedora-model:state> <fedora-model:Active>; <fedora-rels-ext:isMemberOfCollection> <info:fedora/' . $collection_pid . '> FILTER regex(str(?title), "^' . $label . '$", "i") } LIMIT 10';
+          $linkArray = get_link_array($sparqlQuery);
+          if (count($linkArray) > 0) {
+            foreach ($linkArray as $linkItem) {
+              $existingTitle = $linkItem['title'];
+            }
+            $duplicateEntryAlertRequired = true;
+          }
+          break;
+        default:
+          // Processing for Fidora. In Fidora, when a data-component
+          // is processed, the pid of the dataset is present in
+          // collection_pid, so slightly non-standard processing
+          // is required to cater for this.
+          if (!strncmp($collection_pid, 'dtcds:', 5)) { //5 from the length of dtcds
+            $sparqlQuery = 'SELECT ?title ?pid WHERE { ?pid <http://purl.org/dc/elements/1.1/title> ?title; <fedora-model:state> <fedora-model:Active>; <fedora-model:hasModel> ?model; <fedora-rels-ext:isMemberOfCollection> ?collection FILTER( (regex(str(?title), "^' . $label . '$", "i") && sameTerm(?collection, <info:fedora/' . $user_collection . '>)) && !sameTerm(?model, <info:fedora/fba:activity_cmodel>)  && !sameTerm(?model, <info:fedora/fba:dataset_cmodel>) && !sameTerm(?model, <info:fedora/si:conceptCModel>) && !sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>))} LIMIT 10';
+            $linkArray = get_link_array($sparqlQuery);
+            if (count($linkArray) > 0) {
+              foreach ($linkArray as $linkItem) {
+                $existingTitle = $linkItem['title'];
+              }
+              $duplicateEntryAlertRequired = true;
+            }
+          }
+          break;
       }
-      $_SESSION['fedora_ingest_files'] = '';
-      $form_state['storage'] = NULL;
+
+      if ($duplicateEntryAlertRequired) {
+        if (strcmp($label,$existingTitle)) {
+          $msg = 'The entry "' . $label . '" is already present within this collection as "' . $existingTitle . '", so it has not been created.';
+        } else {
+          $msg = 'The entry "' . $label . '" is already present within this collection, so it has not been created.';
+        }
+        drupal_set_message($msg);
+      } else {
+        if (variable_get('rdf_relationships', NULL)) {
+          preprocess_link_data($document);
+        }
+        $foxml = new FOXML($label, $pid, $dsid, $content_model_pid, $collection_pid, $relationship, $ingest_file_location, $document, $transform, $state);
+        $foxml->ingest();
+
+        if (variable_get('rdf_relationships', NULL)) {
+          process_links($form,$form_state, false);
+        }
+        $_SESSION['fedora_ingest_files'] = '';
+        $form_state['storage'] = NULL;
+      }
     }
     $form_state['redirect'] = "fedora/repository/{$collection_pid}";
   }
-
 }
 
 function islandora_content_model_update_form_choice() {

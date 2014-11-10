@@ -223,7 +223,7 @@ class EditObjectMetadataForm {
     if (variable_get('rdf_relationships', NULL)) {
       module_load_include('inc', 'islandora_content_model_forms', 'FOXML');
       module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
-      process_link_data($document);
+      preprocess_link_data($document);
     }
     $this->modifyDatastream($document, $pid, $dsid, "$dsid Record", 'text/xml');
     if (variable_get('rdf_relationships', NULL)) {

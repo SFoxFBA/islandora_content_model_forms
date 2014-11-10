@@ -71,15 +71,38 @@ class PublishObjectMetadataForm {
 
     $ri = $repository->ri;
 
-    //Which parent activities have a fedora:hasConcept relation to this object?
-    $query = 'select ?subject where {?subject <info:fedora/fedora-system:def/relations-external#hasConcept> <info:fedora/' . $pid . '>}';
+    //Which parent activities have a Concept type relation to this object?
+    $conceptrdfs = sidora_return_forward_fba_concept_rdfs();
+    $arraycount = count($conceptrdfs);
+
+    $query = 'select ?subject where {';
+    foreach ($conceptrdfs as $key => $keyvalue) {
+      $query .= '{?subject <info:fedora/fedora-system:def/relations-external#' . $keyvalue . '> <info:fedora/' . $pid . '>}';
+      if ($key < $arraycount - 1) { //as arraycounts don't start at zero
+        $query .= ' UNION ';
+      }
+    }
+    $query .= '}';
+
     $sparql_query_results = $ri->sparqlQuery($query);
     foreach ($sparql_query_results as $sparql_query_result) {
       $parentconcepts[] = $sparql_query_result[subject][value];
     }
 
     //Does this object have any resources?
-    $query = 'select ?object where {<info:fedora/' . $pid . '> <info:fedora/fedora-system:def/relations-external#hasResource> ?object}';
+    $resourcerdfs = sidora_return_forward_fba_resource_rdfs();
+    $arraycount = count($resourcerdfs);
+
+    $query = 'select ?object where {';
+    foreach ($resourcerdfs as $key => $keyvalue) {
+      $query .= '{<info:fedora/' . $pid . '> <info:fedora/fedora-system:def/relations-external#' . $keyvalue . '> ?object}';
+      if ($key < $arraycount - 1) { //as arraycounts don't start at zero
+        $query .= ' UNION ';
+      }
+    }
+    $query .= '}';
+
+
     $sparql_query_results = $ri->sparqlQuery($query);
     foreach ($sparql_query_results as $sparql_query_result) {
       $childresources[] = $sparql_query_result[object][value];
@@ -133,14 +156,14 @@ class PublishObjectMetadataForm {
         // and that that data component has a csv file attached
         $childresourceobject = $repository->getObject($childresource);
 
-        $csvdatastream = $childresourceobject->getDatastream('CSV');
+        $objdatastream = $childresourceobject->getDatastream('OBJ1');
 
-        if ($csvdatastream === FALSE) {
-          $currentrelstext .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CSV DATASTREAM MISSING';
+        if ($objdatastream === FALSE) {
+          $currentrelstext .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;OBJ1 DATASTREAM MISSING';
           $csvallpresent = FALSE;
         }
         else {
-          $currentrelstext .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;csv datastream found';
+          $currentrelstext .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;OBJ1 datastream found';
         }
       }
     }
@@ -222,7 +245,7 @@ class PublishObjectMetadataForm {
   public function createPageTwo($pid, $client, array &$form_state) {
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
 
-    $licenceprivacytext = 'Some stuff will go here to explain licensing. <br/><br/>';
+    $licenceprivacytext = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Aliquam ipsum velit, viverra quis nunc at, efficitur efficitur risus. Plus text to explain licensing. <br/><br/>';
     $selectedcollection = $form_state['values']['publishcollections'];
     $selectedpid = $form_state['values']['pidtopublish'];
     $licenceprivacytext .= $selectedpid . ' has been chosen for publishing to ' . $selectedcollection . '.<br/><br/>';
@@ -311,25 +334,99 @@ class PublishObjectMetadataForm {
   }
 
   public function createPageThree($pid, $client, array &$form_state) {
+    module_load_include('inc', 'fedora_repository', 'ObjectHelper');
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
+    module_load_include('inc', 'content_model_viewer', 'Collection');
+
     global $base_path;
     global $base_root;
+    global $user;
 
-
-    //Add the relsext here.
+    $user_data = unserialize($user->data);
+    $user_pid = $user_data['islandora_user_pid'];
+    $usernumber = substr($user_pid, strpos($user_pid, ':') + 1); //+1 to ignore the colon
+//Add the relsext here.
     $selectedpid = $form_state['values']['pidtopublish'];
     $selectedcollection = $form_state['values']['selectedcollection'];
 
     $repository = tuque_wrapper_get_repository_instance();
     $objecttopublish = $repository->getObject($selectedpid);
-    $objecttopublish->relationships->add(RELS_EXT_URI, 'isMemberOfCollection', $selectedcollection);
+//Find which descendants will need publishing
+    $collection = new Collection($selectedpid);
+    list($descendants, $totaldescs) = $collection->getMembers();
+    foreach ($descendants as $descendant) {
+      $descendantlist[] = $descendant['pid'];
+    }
+//now find ancestors
+    $queryprefix = 'select $subject from <#ri> where { ?object <fedora-model:state> <fedora-model:Active>; {$subject <fedora-rels-ext:hasDataset> <info:fedora/';
+    $querysuffix = '>}}';
+    $query = $queryprefix . $selectedpid . $querysuffix;
+    $sparqlresult = ObjectHelper::performRiQuery($query, 'sparql');
+
+    if ($sparqlresult) {
+      foreach ($sparqlresult as $key => $valuearray) {
+        $ancestorlist[] = $valuearray['subject']; //overall publishing list
+        $parentlist[] = $valuearray['subject']; //immediate parents
+      }
+    }//a check needs putting in here for no returned pids!
+    $queryprefix = 'select $subject from <#ri> where { ?object <fedora-model:state> <fedora-model:Active>; {$subject <fedora-rels-ext:hasActivity> <info:fedora/';
+    foreach ($parentlist as $key => $parentpid) {
+      $founduser = 1;
+//walk up each ancestral path, stopping at user level
+      $query = $queryprefix . $parentpid . $querysuffix;
+      while ($founduser == 1) {
+        $sparqlresult = ObjectHelper::performRiQuery($query, 'sparql');
+        $sparqlresultpid = $sparqlresult[0]['subject'];
+        $founduser = strcmp($user_pid, $sparqlresultpid);
+        if ($founduser == 1) {
+          $ancestorlist[] = $sparqlresultpid;
+        }
+
+        $query = $queryprefix . $sparqlresultpid . $querysuffix;
+      }
+    }
+    //Insert the dataset pid at the top of the list of objects to be processed
+    array_unshift($ancestorlist, $selectedpid);
+
+    $clonelist = array_merge($descendantlist, $ancestorlist);
+
+    //enumerate through clone list to create new objects with prefix "dtcpub<usernumber>:<nnn>"
+    $numberrequired = count($clonelist);
+
+    for ($i = 0; $i < $numberrequired; $i++) {
+      $frompid = $clonelist[$i];
+      //$topid = $newpids[$i];
+      $currentobject = $repository->getObject($frompid);
+      $newobject = $repository->constructObject('dtcpub' . $usernumber);
+      $newobject->label = $currentobject->label;
+      foreach ($currentobject as $dsid => $content) {
+        //will need to go through relsext/relsint of new objects and put translated pids in to keep the inheritance correct.
+        $newobject->ingestDatastream($content);
+        $newds = $newobject[$dsid];
+        $newds->relationships->changeObjectID($newobject->id);
+      }
+      $rel = $newobject->relationships;
+      $rel->changeObjectID($newobject->id); //changes rels-ext only
+
+      $ingested_object = $repository->ingestObject($newobject);
+      $ingested_object->relationships->add(RELS_EXT_URI, 'isMemberOfCollection', $selectedcollection);
+
+      //old dc:identifier pid is still in there
+      //COLS datastreams still have info:fedora/dtcan:13/OBJ1 and <dc:identifier>dtcan:13-1-0</dc:identifier>
+      //RELS-INT still has <relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-1"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-2"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-3"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-4"/>
+    }
+
 
     $redirecturl = $base_root . $base_path . 'fedora/repository/' . $pid;
 
+    $debugstring = '';
+    foreach ($clonelist as $clonepid) {
+      $debugstring.= $clonepid . ' ,<br/> ';
+    }
     $form = array(
       'currentcollections' => array(
         '#type' => 'markup',
-        '#value' => 'Seems to have worked',
+        '#value' => 'These are the objects to be cloned/published: <br/>' . $debugstring,
       ),
       'pidtopublish' => array(
         '#type' => 'hidden',
