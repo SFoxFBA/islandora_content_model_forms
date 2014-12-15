@@ -156,7 +156,13 @@ class IngestObjectMetadataForm {
    * Removes all required fields
    */
   public function _islandora_content_model_forms_remove_required(&$element) {
-    $element['#required'] = FALSE;
+    $mandatoryvalue = $element['#attributes']['mandatory'];
+    if (strcmp($mandatoryvalue, '1') === 0) {
+      //Need to add red asterisk to the title, and then disable required field checking
+      $title = $element['#title'] . '<span class="form-required" title="This field is required.">*</span>';
+      $element['#title'] = $title;
+      $element['#required'] = FALSE;
+    }
 
     foreach (element_children($element) as $key) {
       $this->_islandora_content_model_forms_remove_required($element[$key]);
@@ -202,6 +208,9 @@ class IngestObjectMetadataForm {
     }
 
     $form = xml_form_builder_get_form($form_state, $form_name, $xml);
+    //SFOX This has been customised to signify a required field with asterisk
+    //but then deactivating the required flag, so that the form doesn't handle this validation.
+    //The mandatory field validation is done just before the publish process completion.
     $this->_islandora_content_model_forms_remove_required($form);
     $form['collection_pid'] = array(
       '#type' => 'hidden',
@@ -378,70 +387,9 @@ class IngestObjectMetadataForm {
 
     $relationship = NULL;
     $pid = NULL;
-
+    //SFOX
+    $pidnamespace = fba_solution_pack_get_namespace_from_cmodel($content_model_pid);
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
-    //SFOX we're not using the si namespace, so have added fba cmodels
-    //horribly hard coded, need to extract this from the cmodel ideally
-    switch ($content_model_pid) {
-      //Concepts
-      case 'fba:activity_cmodel': {
-          $pidnamespace = 'dtcac';
-          break;
-        }
-      case 'fba:dataset_cmodel': {
-          $pidnamespace = 'dtcds';
-          break;
-        }
-      //Resources
-      case 'fba:measurement_cmodel': {
-          $pidnamespace = 'dtcmt';
-          break;
-        }
-      case 'fba:analysis_cmodel': {
-          $pidnamespace = 'dtcan';
-          break;
-        }
-      case 'fba:litreview_cmodel': {
-          $pidnamespace = 'dtclr';
-          break;
-        }
-      case 'fba:simulation_cmodel': {
-          $pidnamespace = 'dtcsi';
-          break;
-        }
-      case 'fba:synthesis_cmodel': {
-          $pidnamespace = 'dtcsy';
-          break;
-        }
-      //Supplementary File Resources
-      case 'fba:sp_basic_image': {
-          $pidnamespace = 'dtcim';
-          break;
-        }
-      case 'fba:sp_large_image_cmodel': {
-          $pidnamespace = 'dtcli';
-          break;
-        }
-      case 'fba:library_monograph_cmodel': {
-          $pidnamespace = 'dtclm';
-          break;
-        }
-      case 'fba:library_article_cmodel': {
-          $pidnamespace = 'dtcla';
-          break;
-        }
-      case 'fba:library_chapter_cmodel': {
-          $pidnamespace = 'dtclc';
-          break;
-        }
-      case 'fba:dtc_generic_cmodel': {
-          $pidnamespace = 'dtcgen';
-          break;
-        }
-      default: {
-          $pidnamespace = 'dtcuc'; //
-        }
-    }
     $pid = Fedora_Item::get_next_PID_in_namespace($pidnamespace);
     $relationship = 'isMemberOfCollection';
 
@@ -528,78 +476,61 @@ class IngestObjectMetadataForm {
       $transform = islandora_content_model_get_transform($content_model_pid, $form_name);
 
       /**
-      *
-      * FBA MODIFICATION BY NBYWELL on 06/03/2014. Check content of
-      * the 'rdf_relationships' variable which triggers the
-      * Object Linker functionality.
-      *
-      */
-
+       *
+       * FBA MODIFICATION BY NBYWELL on 06/03/2014. Check content of
+       * the 'rdf_relationships' variable which triggers the
+       * Object Linker functionality.
+       *
+       */
       module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
-      global $user;
-      $duplicateEntryAlertRequired = false;
+      $duplicateEntryMsg = NULL;
 
       /**
-      *
-      * This is a check to determine if an entry already exists
-      * in the current collection for the a particular set of collections.
-      * As it is hard-coded it is debatable whether it should be included 
-      * in the publically released version of this code on GitHub.
-      */
-
-      $user_id = $user->islandora_user_pid;
-      $user_collection_ns = str_replace(array('-',':'),'', $user_id);
-      $user_collection = $user_collection_ns . ':collection';
-
+       *
+       * This is a check to determine if an entry already exists
+       * in the current collection.
+       */
       switch ($collection_pid) {
         // List of collections in which duplicates are not permitted.
         case "fba:vocabpref_collection":
         case "fba:vocabnonpref_collection":
         case "fba:geopref_collection":
         case "fba:geononpref_collection":
+
           $sparqlQuery = 'SELECT ?title ?pid WHERE { ?pid <http://purl.org/dc/elements/1.1/title> ?title; <fedora-model:state> <fedora-model:Active>; <fedora-rels-ext:isMemberOfCollection> <info:fedora/' . $collection_pid . '> FILTER regex(str(?title), "^' . $label . '$", "i") } LIMIT 10';
-          $linkArray = get_link_array($sparqlQuery);
-          if (count($linkArray) > 0) {
-            foreach ($linkArray as $linkItem) {
-              $existingTitle = $linkItem['title'];
-            }
-            $duplicateEntryAlertRequired = true;
-          }
+          $duplicateEntryMsg = check_for_duplicate_label($label, $sparqlQuery);
           break;
         default:
-          // Processing for Fidora. In Fidora, when a data-component
-          // is processed, the pid of the dataset is present in
-          // collection_pid, so slightly non-standard processing
-          // is required to cater for this.
-          if (!strncmp($collection_pid, 'dtcds:', 5)) { //5 from the length of dtcds
-            $sparqlQuery = 'SELECT ?title ?pid WHERE { ?pid <http://purl.org/dc/elements/1.1/title> ?title; <fedora-model:state> <fedora-model:Active>; <fedora-model:hasModel> ?model; <fedora-rels-ext:isMemberOfCollection> ?collection FILTER( (regex(str(?title), "^' . $label . '$", "i") && sameTerm(?collection, <info:fedora/' . $user_collection . '>)) && !sameTerm(?model, <info:fedora/fba:activity_cmodel>)  && !sameTerm(?model, <info:fedora/fba:dataset_cmodel>) && !sameTerm(?model, <info:fedora/si:conceptCModel>) && !sameTerm(?model, <info:fedora/fedora-system:FedoraObject-3.0>))} LIMIT 10';
-            $linkArray = get_link_array($sparqlQuery);
-            if (count($linkArray) > 0) {
-              foreach ($linkArray as $linkItem) {
-                $existingTitle = $linkItem['title'];
-              }
-              $duplicateEntryAlertRequired = true;
-            }
-          }
           break;
       }
 
-      if ($duplicateEntryAlertRequired) {
-        if (strcmp($label,$existingTitle)) {
-          $msg = 'The entry "' . $label . '" is already present within this collection as "' . $existingTitle . '", so it has not been created.';
-        } else {
-          $msg = 'The entry "' . $label . '" is already present within this collection, so it has not been created.';
-        }
-        drupal_set_message($msg);
-      } else {
+      if ($duplicateEntryMsg) {
+        drupal_set_message($duplicateEntryMsg);
+      }
+      else {
         if (variable_get('rdf_relationships', NULL)) {
           preprocess_link_data($document);
         }
         $foxml = new FOXML($label, $pid, $dsid, $content_model_pid, $collection_pid, $relationship, $ingest_file_location, $document, $transform, $state);
         $foxml->ingest();
+        /* SFOX need to blank out all dc datastream values for now, so that they don't get indexed ?? */
 
+        /*
+          $connection = islandora_get_tuque_connection();
+          $repository = $connection->repository;
+          $repository = tuque_wrapper_get_repository_instance();
+
+          $fedora_object = $repository->getObject($pid);
+          $csdsid = 'CHILD_SECURITY';
+          $csdatastream = isset($fedora_object[$csdsid]) ? $fedora_object[$csdsid] : $fedora_object->constructDatastream($csdsid);
+          $csdatastream->label = 'CHILD_SECURITY';
+          $csdatastream->mimeType = 'datastream/mimetype';
+          $module_path = drupal_get_path('module', 'sidora');
+          $csdatastream->setContentFromFile($module_path . '/includes/child_security.xml');
+          $document->ingestDatastream($csdatastream);
+         */
         if (variable_get('rdf_relationships', NULL)) {
-          process_links($form,$form_state, false);
+          process_links($form, $form_state, false);
         }
         $_SESSION['fedora_ingest_files'] = '';
         $form_state['storage'] = NULL;
@@ -607,6 +538,7 @@ class IngestObjectMetadataForm {
     }
     $form_state['redirect'] = "fedora/repository/{$collection_pid}";
   }
+
 }
 
 function islandora_content_model_update_form_choice() {

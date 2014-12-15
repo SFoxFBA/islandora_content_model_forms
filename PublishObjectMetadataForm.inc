@@ -39,6 +39,99 @@ class PublishObjectMetadataForm {
     return $potential_models;
   }
 
+  public function getFieldsRequiringValidation($pid, $sxmldtca) {
+    module_load_include('inc', 'xml_form_builder', 'XMLFormDatabase');
+    module_load_include('inc', 'xml_form_api', 'XMLForm');
+    module_load_include('inc', 'xml_form_api', 'XMLFormDefinition');
+    module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
+
+
+    module_load_include('inc', 'fedora_repository', 'api/fedora_utils');
+    module_load_include('inc', 'fedora_repository', 'ObjectHelper');
+
+    $objectHelper = new ObjectHelper();
+    $content_models = $objectHelper->get_content_models_list($pid);
+    foreach ($content_models as $content_model) {
+      if (strpos($content_model->pid, 'si:') === FALSE) { //SFOX horrible hack to ignore si content models
+        $content_model_pid = $content_model->pid;
+      }
+    }
+    $object_linker_form_name = get_object_linker_form_name($pid, $content_model_pid);
+    $olformdatabase = XMLFormDatabase::Get($object_linker_form_name);
+    $object_linker = new XMLFormDefinition($olformdatabase);
+    $object_linker_definition = $object_linker->definition;
+//$test = $object_linker_definition->saveXML();
+    $object_linker_form = $object_linker->getForm();
+//compile the list of form fields that have "fieldvalidator" as an attribute
+
+    $xpath = new DOMXPath($object_linker_definition);
+    $results = $xpath->query("//fieldvalidator");
+    $rescount = $results->length;
+
+    $validationobjects = array();
+    for ($i = 0; $i < $rescount; $i++) {
+//need to get 'name' from topmost element in nodepath
+      $node = $results->item($i);
+      $nodepath = $node->getNodePath();
+      $name = $node->nodeName;
+      $val = $node->nodeValue;
+//try and find actions/read/path
+      $readpos = strpos($nodepath, 'attributes/fieldvalidator');
+      $readprefix = substr($nodepath, 0, $readpos);
+      $readpath = $readprefix . '/actions/read/path';
+      $readval = $xpath->evaluate($readpath);
+      $readvalitem = $readval->item(0)->nodeValue;
+      //remove the '/dtca:xxxx/' prefix
+      $sxmldtca->registerXPathNamespace('dtca', 'http://fba.org.uk/schemas/dtca/1.0.0');
+      $sxmldtca->registerXPathNamespace('gco', 'http://www.isotc211.org/2005/gco');
+      $xpathresult = $sxmldtca->xpath($readvalitem);
+      $xpathresulttext = (string) $xpathresult[0];
+
+      $pos = strpos($nodepath, 'properties/attributes/fieldvalidator');
+      $prefix = substr($nodepath, 0, $pos);
+      $titlepath = $prefix . '/title';
+      $titleval = $xpath->evaluate($titlepath);
+      $titlevalitem = $titleval->item(0)->nodeValue;
+      $continueloop = TRUE;
+      while (is_null($titlevalitem) && $continueloop) {
+        $pos = strrpos($prefix, 'children/element');
+        $prefix = substr($nodepath, 0, $pos);
+        if (strpos($prefix, 'element') === FALSE) {
+          $continueloop = FALSE;
+        }
+        else {
+          $titlepath = $prefix . '/title';
+          $titleval = $xpath->evaluate($titlepath);
+          $titlevalitem = $titleval->item(0)->nodeValue;
+        }
+      }
+      if (is_null($titlevalitem)) {
+        $titlevalitem = 'Warning - title field missing';
+      }
+      $validationobjects[] = array($nodepath, $titlevalitem, $val, $readvalitem, $xpathresulttext);
+    }
+//set up array of grouped fields
+    foreach ($validationobjects as $valobjectkey => $validationobject) {
+      if (ctype_upper(substr($validationobject[2], 1, 1))) {
+//Upper case second letter, this field is part of a group
+        $fieldgroups[substr($validationobject[2], 1, 1)][] = $valobjectkey;
+      }
+      else
+      if (strpos($validationobject[2], 'voc') !== FALSE) {
+        $checkagainstvocab[] = $valobjectkey;
+      }
+      else
+      if (strpos($validationobject[2], 'geo') !== FALSE) {
+        $checkagainstgeovocab[] = $valobjectkey;
+      }
+      else
+        $simplecheck[] = $valobjectkey;
+    }
+// validate each of the fieldgroups 
+
+    return $validationobjects;
+  }
+
   /**
    * Create page one.
    *
@@ -50,6 +143,10 @@ class PublishObjectMetadataForm {
    * @return array
    */
   public function createPageOne($pid, $client, array &$form_state) {
+    $dtcadatastream = $this->getMetadata($pid, 'DTCA', $client);
+    $sxmldtca = simplexml_load_string($dtcadatastream);
+    $datasetfieldsrequiringvalidation = $this->getFieldsRequiringValidation($pid, $sxmldtca);
+
     $currentrels = array();
     $futurerels = array();
     $repository = tuque_wrapper_get_repository_instance();
@@ -71,7 +168,8 @@ class PublishObjectMetadataForm {
 
     $ri = $repository->ri;
 
-    //Which parent activities have a Concept type relation to this object?
+	//Which parent activities have a Concept type relation to this object?
+	//This needs to be an (upwards) recursive loop stopping at fbauser<nn> level
     $conceptrdfs = sidora_return_forward_fba_concept_rdfs();
     $arraycount = count($conceptrdfs);
 
@@ -165,11 +263,112 @@ class PublishObjectMetadataForm {
         else {
           $currentrelstext .= '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;OBJ1 datastream found';
         }
+        $currentrelstext .= '<br/>';
+
+// Need to confirm child resources have the correct number of inputs
+// put a function in here to return the number of inputs maybe xpath on <DTCA datastream, dtca:input/<gco:CharacterString, <keyword authority
+        $dtcadatastream = $this->getMetadata($childresource, 'DTCA', $client);
+
+        $sxmldtca = simplexml_load_string($dtcadatastream);
+
+        if ($sxmldtca) {
+          $sxmldtca->registerXPathNamespace('dtca', 'http://fba.org.uk/schemas/dtca/1.0.0');
+          $sxmldtca->registerXPathNamespace('gco', 'http://www.isotc211.org/2005/gco');
+          $xpathresult = $sxmldtca->xpath('//dtca:input/gco:CharacterString');
+          $numinputs = 0;
+          foreach ($xpathresult as $foundinput) {
+            if (strlen((string) $foundinput) > 0) {
+              $numinputs++;
+            }
+          }
+
+          $numinputmessage = 'This ';
+          $pidns = substr($childresource, 0, strpos($childresource, ':'));
+          switch ($pidns) {
+            case 'dtcan': {
+                $numinputmessage .= 'analysis has ' . $numinputs . ' input(s)';
+                if ($numinputs > 1) {
+                  $validnumberofinputs[] = TRUE;
+                  $numinputmessage .= ' - Passed<br/>';
+                }
+                else {
+                  $validnumberofinputs[] = FALSE;
+                  $numinputmessage .= ' - Failed<br/>';
+                }
+                break;
+              }
+            case 'dtcmt': {
+                $numinputmessage .= 'measurement has ' . $numinputs . ' input(s)<br/>';
+                if ($numinputs = 0) {
+                  $validnumberofinputs[] = TRUE;
+                  $numinputmessage .= ' - Passed<br/>';
+                }
+                else {
+                  $validnumberofinputs[] = FALSE;
+                  $numinputmessage .= ' - Failed<br/>';
+                }
+                break;
+              }
+            case 'dtclr': {
+                $numinputmessage .= 'literature review has ' . $numinputs . ' input(s)<br/>';
+                if ($numinputs > 0) {
+                  $validnumberofinputs[] = TRUE;
+                  $numinputmessage .= ' - Passed<br/>';
+                }
+                else {
+                  $validnumberofinputs[] = FALSE;
+                  $numinputmessage .= ' - Failed<br/>';
+                }
+                break;
+              }
+            case 'dtcsy': {
+                $numinputmessage .= 'synthesis has ' . $numinputs . ' input(s)<br/>';
+                if ($numinputs > 2) {
+                  $validnumberofinputs[] = TRUE;
+                  $numinputmessage .= ' - Passed<br/>';
+                }
+                else {
+                  $validnumberofinputs[] = FALSE;
+                  $numinputmessage .= ' - Failed<br/>';
+                }
+                break;
+              }
+            case 'dtcsi': {
+                $numinputmessage .= 'simulation has ' . $numinputs . ' input(s)<br/>';
+                if ($numinputs > 0) {
+                  $validnumberofinputs[] = TRUE;
+                  $numinputmessage .= ' - Passed<br/>';
+                }
+                else {
+                  $validnumberofinputs[] = FALSE;
+                  $numinputmessage .= ' - Failed<br/>';
+                }
+                break;
+              }
+            default:
+              break;
+          }
+          $currentrelstext .= $numinputmessage;
+        }
+        else {
+//DTCA datastream is missing, so no validation required. For supplemantary files
+          $validnumberofinputs[] = TRUE;
+        }
       }
     }
     else {
       $currentrelstext .= '<br/><h2>Child Resources</h2><br/> - none';
       $csvallpresent = FALSE;
+    }
+//all have to have valid number of inputs to pass
+    $passedonallinputs = TRUE;
+    if ($validnumberofinputs) { //are there any values to work on?
+      foreach ($validnumberofinputs as $passflag) {
+        if (!$passflag) {
+          $passedonallinputs = FALSE; //don't have to look for another Fail after first has been found
+          break;
+        }
+      }
     }
     $currentrelstext .= '<br/>';
 
@@ -198,8 +397,24 @@ class PublishObjectMetadataForm {
       $currentrelstext .= 'MISSING';
     }
     $currentrelstext .= '<br/>';
+    $currentrelstext .= '<br/><h1>Subject and Geovocab terms</h1><br/>';
 
-    if ($ismemberofusercollection && $parentconcepts && $csvallpresent && $dtcatitle && $dtcaabstract) {
+    $validgeosubjectkeywords = FALSE;
+    $dtcakeywords = $sxmldtca->keyword;
+    $numkeywords = $dtcakeywords->count();
+
+    foreach ($dtcakeywords as $dtcakeyword) {
+      $keywordattrs = $dtcakeyword->attributes();
+      foreach ($keywordattrs as $keywattr => $keywvalue) {
+        $keywvaluestring = (string) $keywvalue;
+      }
+      $dtcakeywordchild = $dtcakeyword->children('http://www.isotc211.org/2005/gco');
+      foreach ($dtcakeywordchild as $keycharstring => $sxekeyword) {
+        $sxekeywordstr = (string) $sxekeyword;
+//why is this not returning a string!?!?
+      }
+    }
+    if ($ismemberofusercollection && $parentconcepts && $csvallpresent && $dtcatitle && $dtcaabstract && $passedonallinputs && $validgeosubjectkeywords) {
       $form = array(
         'currentcollections' => array(
           '#type' => 'markup',
@@ -365,56 +580,74 @@ class PublishObjectMetadataForm {
 
     if ($sparqlresult) {
       foreach ($sparqlresult as $key => $valuearray) {
-        $ancestorlist[] = $valuearray['subject']; //overall publishing list
-        $parentlist[] = $valuearray['subject']; //immediate parents
+        if (strcmp($user_pid, $valuearray['subject']) != 0) { //the object might be nextmost level to user pid
+          $ancestorlist[] = $valuearray['subject']; //overall publishing list
+          $parentlist[] = $valuearray['subject']; //immediate parents
+        }
       }
     }//a check needs putting in here for no returned pids!
-    $queryprefix = 'select $subject from <#ri> where { ?object <fedora-model:state> <fedora-model:Active>; {$subject <fedora-rels-ext:hasActivity> <info:fedora/';
-    foreach ($parentlist as $key => $parentpid) {
-      $founduser = 1;
-//walk up each ancestral path, stopping at user level
-      $query = $queryprefix . $parentpid . $querysuffix;
-      while ($founduser == 1) {
-        $sparqlresult = ObjectHelper::performRiQuery($query, 'sparql');
-        $sparqlresultpid = $sparqlresult[0]['subject'];
-        $founduser = strcmp($user_pid, $sparqlresultpid);
-        if ($founduser == 1) {
-          $ancestorlist[] = $sparqlresultpid;
-        }
 
-        $query = $queryprefix . $sparqlresultpid . $querysuffix;
+    if ($parentlist) {
+      $queryprefix = 'select $subject from <#ri> where { ?object <fedora-model:state> <fedora-model:Active>; {$subject <fedora-rels-ext:hasActivity> <info:fedora/';
+      foreach ($parentlist as $key => $parentpid) {
+        $founduser = 1;
+//walk up each ancestral path, stopping at user level
+        $query = $queryprefix . $parentpid . $querysuffix;
+        while ($founduser == 1) {
+          $sparqlresult = ObjectHelper::performRiQuery($query, 'sparql');
+          $sparqlresultpid = $sparqlresult[0]['subject'];
+          $founduser = strcmp($user_pid, $sparqlresultpid);
+          if ($founduser == 1) {
+            $ancestorlist[] = $sparqlresultpid;
+          }
+          $query = $queryprefix . $sparqlresultpid . $querysuffix;
+        }
       }
     }
-    //Insert the dataset pid at the top of the list of objects to be processed
-    array_unshift($ancestorlist, $selectedpid);
+//Insert the dataset pid at the top of the list of objects to be processed
+    if ($ancestorlist) {
+      array_unshift($ancestorlist, $selectedpid);
+    }
+    else {
+      $ancestorlist[] = $selectedpid;
+    }
 
     $clonelist = array_merge($descendantlist, $ancestorlist);
 
-    //enumerate through clone list to create new objects with prefix "dtcpub<usernumber>:<nnn>"
+//enumerate through clone list to create new objects with prefix "dtcpub<usernumber>:<nnn>"
     $numberrequired = count($clonelist);
 
-    for ($i = 0; $i < $numberrequired; $i++) {
-      $frompid = $clonelist[$i];
-      //$topid = $newpids[$i];
-      $currentobject = $repository->getObject($frompid);
-      $newobject = $repository->constructObject('dtcpub' . $usernumber);
-      $newobject->label = $currentobject->label;
-      foreach ($currentobject as $dsid => $content) {
-        //will need to go through relsext/relsint of new objects and put translated pids in to keep the inheritance correct.
-        $newobject->ingestDatastream($content);
-        $newds = $newobject[$dsid];
-        $newds->relationships->changeObjectID($newobject->id);
-      }
-      $rel = $newobject->relationships;
-      $rel->changeObjectID($newobject->id); //changes rels-ext only
-
-      $ingested_object = $repository->ingestObject($newobject);
-      $ingested_object->relationships->add(RELS_EXT_URI, 'isMemberOfCollection', $selectedcollection);
-
-      //old dc:identifier pid is still in there
-      //COLS datastreams still have info:fedora/dtcan:13/OBJ1 and <dc:identifier>dtcan:13-1-0</dc:identifier>
-      //RELS-INT still has <relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-1"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-2"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-3"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-4"/>
-    }
+//for ($i = 0; $i < $numberrequired; $i++) {
+//$frompid = $clonelist[$i];
+//$topid = $newpids[$i];
+//$currentobject = $repository->getObject($frompid);
+//$newobject = $repository->constructObject('dtcpub' . $usernumber);
+//$newobject->label = $currentobject->label;
+//foreach ($currentobject as $dsid => $content) {
+//will need to go through relsext/relsint of new objects and put translated pids in to keep the inheritance correct.
+//$newobject->ingestDatastream($content);
+//$newds = $newobject[$dsid];
+//$newds->relationships->changeObjectID($newobject->id);
+//switch ($dsid) {
+//  case 'RELS-EXT':
+//    $rels = $currentobject->relationships->get();
+//    $newds->relationships->remove(FEDORA_MODEL_URI, 'isMemberOfCollection', 'info:fedora/fbauser' . $usernumber . ':collection');
+//    break;
+//  case 'DC':
+//$newds->relationships->remove(FEDORA_MODEL_URI, 'isMemberOfCollection', 'fbauser' . $usernumber . ':collection');
+//    break;
+//  default:
+//    break;
+// }
+//}
+//$rel = $newobject->relationships;
+//$rel->changeObjectID($newobject->id); //changes rels-ext only
+//$ingested_object = $repository->ingestObject($newobject);
+//$ingested_object->relationships->add(RELS_EXT_URI, 'isMemberOfCollection', $selectedcollection);
+//old dc:identifier pid is still in there
+//COLS datastreams still have info:fedora/dtcan:13/OBJ1 and <dc:identifier>dtcan:13-1-0</dc:identifier>
+//RELS-INT still has <relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-1"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-2"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-3"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-4"/>
+//}
 
 
     $redirecturl = $base_root . $base_path . 'fedora/repository/' . $pid;

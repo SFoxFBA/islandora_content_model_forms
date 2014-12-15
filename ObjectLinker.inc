@@ -905,7 +905,7 @@ function remove_links_on_purge($subjectPid) {
     $subjectDCTitle = get_dc_title($subject);
     foreach ($rdf_relationships as $rdf_relationship) {
       // The outward rdf links do not strictly need to be
-      // removed as they will be deleted from the trple-store
+      // removed as they will be deleted from the triple-store
       // as part of the standard fedora processing on purge.
       // However, as the object-datastream updates have to
       // be done and the inverse links have to be removed
@@ -974,19 +974,21 @@ function remove_links_on_purge($subjectPid) {
         $spoObject = '<info:fedora/' . $subjectPid . '>';
         $objectTriplesForRelationship = spo_search($spoSubject, $spoPredicate, $spoObject);
         $objectTriplesForRelationshipTot = count($objectTriplesForRelationship);
-        foreach ($objectTriplesForRelationship as $objectTripleForRelationship) {
-          $objectPid = $objectTripleForRelationship['subjectPid'];
-          $object = islandora_object_load($objectPid);
-          if ($object) {
-            $object->relationships->remove($inverseNamespace, $inverseName, $subject);
-            // Check if inverse-object-symmetric datastream processing
-            // is required.
-            if ($rdf_relationship['symmetry_in_object_datastream_required'] && strlen($rdf_relationship['object_xpath_data_search']) > 0) {
-              remove_from_datastream($rdf_relationship, $objectPid, $rdf_relationship['object_xpath_data_search'], $rdf_relationship['object_xpath_data_build_countback'], $subjectDCTitle);
+        if ($objectTriplesForRelationshipTot > 0) {
+          foreach ($objectTriplesForRelationship as $objectTripleForRelationship) {
+            $objectPid = $objectTripleForRelationship['subjectPid'];
+            $object = islandora_object_load($objectPid);
+            if ($object) {
+              $object->relationships->remove($inverseNamespace, $inverseName, $subject);
+              // Check if inverse-object-symmetric datastream processing
+              // is required.
+              if ($rdf_relationship['symmetry_in_object_datastream_required'] && strlen($rdf_relationship['object_xpath_data_search']) > 0) {
+                remove_from_datastream($rdf_relationship, $objectPid, $rdf_relationship['object_xpath_data_search'], $rdf_relationship['object_xpath_data_build_countback'], $subjectDCTitle);
+              }
+            } else {
+              $msg = 'While purging "' . $subjectDCTitle . '" with ID "' . $subjectPid . '" and attempting to remove the inverse link "' . $inverseName . '" on the object "' . $objectPid . '", the object for this ID was not found.' ; 
+              drupal_set_message(t($msg));
             }
-          } else {
-            $msg = 'While purging "' . $subjectDCTitle . '" with ID "' . $subjectPid . '" and attempting to remove the inverse link "' . $inverseName . '" on the object "' . $objectPid . '", the object for this ID was not found.' ; 
-            drupal_set_message(t($msg));
           }
         }
       }
@@ -1061,27 +1063,40 @@ function get_dc_title(&$object) {
  *
  * Get the content model associated with the PID of the
  * object passed in as a parameter. If more than one
- * content model is associated with the object, output
- * an error message and return an empty string.
+ * content model (that is not part of the core processing)
+ * is associated with the object, output an error message
+ * and return an empty string.
  *
- * @param string $objectPid
+ * @param string $pid
  *   The PID of the object for which the content
  *   model is to be found.
  *  
  * @return string
  *   The PID of the content model or an empty string.
  */
-function get_object_linker_content_model($objectPid) {
+function get_object_linker_content_model($pid) {
   module_load_include('inc', 'fedora_repository', 'api/fedora_utils');
-  module_load_include('inc', 'fedora_repository', 'ObjectHelper');
+  $spoSubject = '<info:fedora/' . $pid . '>';
+  $spoPredicate = '<info:fedora/fedora-system:def/model#hasModel>';
+  $spoObject = '*';
+  $contentModels = spo_search($spoSubject, $spoPredicate, $spoObject);
+  $contentModelsTot = count($contentModels);
 
-  $objectHelper = new ObjectHelper();
-  $content_models = $objectHelper->get_content_models_list($objectPid);
-  $contentModelsTot = count($content_models);
+  foreach ($contentModels as $contentModel) {
+    switch ($contentModel['objectPid']) {
+      case "fedora-system:FedoraObject-3.0":
+      case "si:resourceCModel":
+      case "si:conceptCModel":
+        $contentModelsTot -= 1;
+        break;
+      default:
+        $objectLinkerContentModel = $contentModel['objectPid'];
+    }
+  }
   if ($contentModelsTot == 1) {
-    return $content_models[0]->pid;
+    return $objectLinkerContentModel;
   } else {
-     $msg = $objectPid . ', has ' . $contentModelsTot . ' content models attached so the form name could not be determined and so any links created by the Object Linker cannot be processed.';
+     $msg = $pid . ', has ' . $contentModelsTot . ' content models attached so the form name could not be determined and so any links created by the Object Linker cannot be processed.';
      drupal_set_message(t($msg), 'error');
      return '';
    }
@@ -1395,5 +1410,40 @@ function get_rdf_subject_entries($objectPid, $predicate, $limit, $returnType, $h
     return get_link_array($sparqlQuery);
   } else {
     return get_link_list($header, $sparqlQuery);
+  }
+}
+
+/**
+ *
+ * Check whether an object with a title equivalent to
+ * the value passed in as a label already exists according
+ * to the criteria contained in the sparql query supplied.
+ *
+ * @param string $label
+ *   The label field from the object
+ *  
+ * @param string $sparqlQuery
+ *   The sparql query to be used to check for a duplicate. It
+ *   should select only 'title'.
+ * 
+ * @return string
+ *   Either NULL when no duplicate is found, or an error message
+ *   when a duplicate is found.
+ *   
+ */
+function check_for_duplicate_label($label, $sparqlQuery) {
+  $linkArray = get_link_array($sparqlQuery);
+  if (count($linkArray) > 0) {
+    foreach ($linkArray as $linkItem) {
+       $existingTitle = $linkItem['title'];
+       break;
+    }
+    if (strcmp($label, $existingTitle)) {
+      return 'The entry "' . $label . '" is already present within this collection as "' . $existingTitle . '", so it has not been created.';
+    } else {
+      return 'The entry "' . $label . '" is already present within this collection, so it has not been created.';
+    }
+  } else {
+    return NULL;
   }
 }
