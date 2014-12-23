@@ -75,6 +75,23 @@ class EditObjectMetadataForm {
   }
 
   /**
+   * Removes all required fields
+   */
+  public function _islandora_content_model_edit_forms_remove_required(&$element) {
+    $mandatoryvalue = $element['#attributes']['mandatory'];
+    if (strcmp($mandatoryvalue, '1') === 0) {
+      //Need to add red asterisk to the title, and then disable required field checking
+      $title = $element['#title'] . '<span class="form-required" title="This field is required.">*</span>';
+      $element['#title'] = $title;
+      $element['#required'] = FALSE;
+    }
+
+    foreach (element_children($element) as $key) {
+      $this->_islandora_content_model_edit_forms_remove_required($element[$key]);
+    }
+  }
+
+  /**
    * Create page two.
    *
    * @param string $pid
@@ -98,6 +115,7 @@ class EditObjectMetadataForm {
     }
 
     $form = xml_form_builder_get_form($form_state, $form_name, $xml);
+    $this->_islandora_content_model_edit_forms_remove_required($form); //SFOX copied code from the object creation workflow
     $form['forms'] = array(
       '#type' => 'hidden',
       '#value' => $form_state['values']['forms'],

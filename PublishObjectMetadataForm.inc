@@ -60,9 +60,9 @@ class PublishObjectMetadataForm {
     $olformdatabase = XMLFormDatabase::Get($object_linker_form_name);
     $object_linker = new XMLFormDefinition($olformdatabase);
     $object_linker_definition = $object_linker->definition;
-//$test = $object_linker_definition->saveXML();
+    //$test = $object_linker_definition->saveXML();
     $object_linker_form = $object_linker->getForm();
-//compile the list of form fields that have "fieldvalidator" as an attribute
+    //compile the list of form fields that have "fieldvalidator" as an attribute
 
     $xpath = new DOMXPath($object_linker_definition);
     $results = $xpath->query("//fieldvalidator");
@@ -143,6 +143,8 @@ class PublishObjectMetadataForm {
    * @return array
    */
   public function createPageOne($pid, $client, array &$form_state) {
+
+    global $user;
     $dtcadatastream = $this->getMetadata($pid, 'DTCA', $client);
     $sxmldtca = simplexml_load_string($dtcadatastream);
     $datasetfieldsrequiringvalidation = $this->getFieldsRequiringValidation($pid, $sxmldtca);
@@ -151,6 +153,7 @@ class PublishObjectMetadataForm {
     $futurerels = array();
     $repository = tuque_wrapper_get_repository_instance();
     $objecttopublish = $repository->getObject($pid);
+
     $relationships = $objecttopublish->relationships->get('info:fedora/fedora-system:def/relations-external#', 'isMemberOfCollection');
 
     //Is this in an 'fbauserNN:collection'?
@@ -167,58 +170,28 @@ class PublishObjectMetadataForm {
     }
 
     $ri = $repository->ri;
-
-	//Which parent activities have a Concept type relation to this object?
-	//This needs to be an (upwards) recursive loop stopping at fbauser<nn> level
-    $conceptrdfs = sidora_return_forward_fba_concept_rdfs();
-    $arraycount = count($conceptrdfs);
-
-    $query = 'select ?subject where {';
-    foreach ($conceptrdfs as $key => $keyvalue) {
-      $query .= '{?subject <info:fedora/fedora-system:def/relations-external#' . $keyvalue . '> <info:fedora/' . $pid . '>}';
-      if ($key < $arraycount - 1) { //as arraycounts don't start at zero
-        $query .= ' UNION ';
-      }
-    }
-    $query .= '}';
-
-    $sparql_query_results = $ri->sparqlQuery($query);
-    foreach ($sparql_query_results as $sparql_query_result) {
-      $parentconcepts[] = $sparql_query_result[subject][value];
-    }
-
+    //Which parent activities have a Concept type relation to this object?
+    //This needs to be an (upwards) recursive loop stopping at fbauser<nn> level
+    $elements = array();
+    $parentconcepts = $this->buildTree($pid, $elements, $user->islandora_user_pid);
+    
     //Does this object have any resources?
-    $resourcerdfs = sidora_return_forward_fba_resource_rdfs();
-    $arraycount = count($resourcerdfs);
-
-    $query = 'select ?object where {';
-    foreach ($resourcerdfs as $key => $keyvalue) {
-      $query .= '{<info:fedora/' . $pid . '> <info:fedora/fedora-system:def/relations-external#' . $keyvalue . '> ?object}';
-      if ($key < $arraycount - 1) { //as arraycounts don't start at zero
-        $query .= ' UNION ';
-      }
-    }
-    $query .= '}';
-
-
-    $sparql_query_results = $ri->sparqlQuery($query);
-    foreach ($sparql_query_results as $sparql_query_result) {
-      $childresources[] = $sparql_query_result[object][value];
-    }
+    $childresources = $this->getChildResources($pid);
 
     //Which collections can this object be published to?
-    $query = 'select ?subject where {?subject <info:fedora/fedora-system:def/relations-external#isMemberOfCollection> <info:fedora/dtc:collection>}';
+    /*    $query = 'select ?subject where {?subject <info:fedora/fedora-system:def/relations-external#isMemberOfCollection> <info:fedora/dtc:collection>}';
 
-    $sparql_query_results = $ri->sparqlQuery($query);
-    foreach ($sparql_query_results as $sparql_query_result) {
+      $sparql_query_results = $ri->sparqlQuery($query);
+      foreach ($sparql_query_results as $sparql_query_result) {
       if (strpos($sparql_query_result[subject][value], ':root') === FALSE) { //Bodged code to remove roots for now until MH decides final format
-        $futurerels[$sparql_query_result[subject][value]] = $sparql_query_result[subject][value];
+      $futurerels[$sparql_query_result[subject][value]] = $sparql_query_result[subject][value];
       }
-    }
+      } */
+    $futurerels = $this->getPublishCollectionsList();
     $remainingrels = array_diff($futurerels, $currentrels); //Don't want to try and re-add it to an existing collection
     //foreach ($remainingrels as $rel) {
-//      $relsarray .= '<option value=' . $rel . '>' . $rel . '</option>';
-//    }
+    //      $relsarray .= '<option value=' . $rel . '>' . $rel . '</option>';
+    //    }
 
     $currentrelstext = '<br/><h1>' . $pid . '</h1>';
     $currentrelstext .= '<br/>Currently in collection(s) <br/>';
@@ -265,8 +238,8 @@ class PublishObjectMetadataForm {
         }
         $currentrelstext .= '<br/>';
 
-// Need to confirm child resources have the correct number of inputs
-// put a function in here to return the number of inputs maybe xpath on <DTCA datastream, dtca:input/<gco:CharacterString, <keyword authority
+        // Need to confirm child resources have the correct number of inputs
+        // put a function in here to return the number of inputs maybe xpath on <DTCA datastream, dtca:input/<gco:CharacterString, <keyword authority
         $dtcadatastream = $this->getMetadata($childresource, 'DTCA', $client);
 
         $sxmldtca = simplexml_load_string($dtcadatastream);
@@ -560,19 +533,19 @@ class PublishObjectMetadataForm {
     $user_data = unserialize($user->data);
     $user_pid = $user_data['islandora_user_pid'];
     $usernumber = substr($user_pid, strpos($user_pid, ':') + 1); //+1 to ignore the colon
-//Add the relsext here.
+    //Add the relsext here.
     $selectedpid = $form_state['values']['pidtopublish'];
     $selectedcollection = $form_state['values']['selectedcollection'];
 
     $repository = tuque_wrapper_get_repository_instance();
     $objecttopublish = $repository->getObject($selectedpid);
-//Find which descendants will need publishing
+    //Find which descendants will need publishing
     $collection = new Collection($selectedpid);
     list($descendants, $totaldescs) = $collection->getMembers();
     foreach ($descendants as $descendant) {
       $descendantlist[] = $descendant['pid'];
     }
-//now find ancestors
+    //now find ancestors
     $queryprefix = 'select $subject from <#ri> where { ?object <fedora-model:state> <fedora-model:Active>; {$subject <fedora-rels-ext:hasDataset> <info:fedora/';
     $querysuffix = '>}}';
     $query = $queryprefix . $selectedpid . $querysuffix;
@@ -591,7 +564,7 @@ class PublishObjectMetadataForm {
       $queryprefix = 'select $subject from <#ri> where { ?object <fedora-model:state> <fedora-model:Active>; {$subject <fedora-rels-ext:hasActivity> <info:fedora/';
       foreach ($parentlist as $key => $parentpid) {
         $founduser = 1;
-//walk up each ancestral path, stopping at user level
+        //walk up each ancestral path, stopping at user level
         $query = $queryprefix . $parentpid . $querysuffix;
         while ($founduser == 1) {
           $sparqlresult = ObjectHelper::performRiQuery($query, 'sparql');
@@ -604,7 +577,7 @@ class PublishObjectMetadataForm {
         }
       }
     }
-//Insert the dataset pid at the top of the list of objects to be processed
+    //Insert the dataset pid at the top of the list of objects to be processed
     if ($ancestorlist) {
       array_unshift($ancestorlist, $selectedpid);
     }
@@ -614,40 +587,40 @@ class PublishObjectMetadataForm {
 
     $clonelist = array_merge($descendantlist, $ancestorlist);
 
-//enumerate through clone list to create new objects with prefix "dtcpub<usernumber>:<nnn>"
+    //enumerate through clone list to create new objects with prefix "dtcpub<usernumber>:<nnn>"
     $numberrequired = count($clonelist);
 
-//for ($i = 0; $i < $numberrequired; $i++) {
-//$frompid = $clonelist[$i];
-//$topid = $newpids[$i];
-//$currentobject = $repository->getObject($frompid);
-//$newobject = $repository->constructObject('dtcpub' . $usernumber);
-//$newobject->label = $currentobject->label;
-//foreach ($currentobject as $dsid => $content) {
-//will need to go through relsext/relsint of new objects and put translated pids in to keep the inheritance correct.
-//$newobject->ingestDatastream($content);
-//$newds = $newobject[$dsid];
-//$newds->relationships->changeObjectID($newobject->id);
-//switch ($dsid) {
-//  case 'RELS-EXT':
-//    $rels = $currentobject->relationships->get();
-//    $newds->relationships->remove(FEDORA_MODEL_URI, 'isMemberOfCollection', 'info:fedora/fbauser' . $usernumber . ':collection');
-//    break;
-//  case 'DC':
-//$newds->relationships->remove(FEDORA_MODEL_URI, 'isMemberOfCollection', 'fbauser' . $usernumber . ':collection');
-//    break;
-//  default:
-//    break;
-// }
-//}
-//$rel = $newobject->relationships;
-//$rel->changeObjectID($newobject->id); //changes rels-ext only
-//$ingested_object = $repository->ingestObject($newobject);
-//$ingested_object->relationships->add(RELS_EXT_URI, 'isMemberOfCollection', $selectedcollection);
-//old dc:identifier pid is still in there
-//COLS datastreams still have info:fedora/dtcan:13/OBJ1 and <dc:identifier>dtcan:13-1-0</dc:identifier>
-//RELS-INT still has <relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-1"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-2"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-3"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-4"/>
-//}
+    //for ($i = 0; $i < $numberrequired; $i++) {
+    //$frompid = $clonelist[$i];
+    //$topid = $newpids[$i];
+    //$currentobject = $repository->getObject($frompid);
+    //$newobject = $repository->constructObject('dtcpub' . $usernumber);
+    //$newobject->label = $currentobject->label;
+    //foreach ($currentobject as $dsid => $content) {
+    //will need to go through relsext/relsint of new objects and put translated pids in to keep the inheritance correct.
+    //$newobject->ingestDatastream($content);
+    //$newds = $newobject[$dsid];
+    //$newds->relationships->changeObjectID($newobject->id);
+    //switch ($dsid) {
+    //  case 'RELS-EXT':
+    //    $rels = $currentobject->relationships->get();
+    //    $newds->relationships->remove(FEDORA_MODEL_URI, 'isMemberOfCollection', 'info:fedora/fbauser' . $usernumber . ':collection');
+    //    break;
+    //  case 'DC':
+    //$newds->relationships->remove(FEDORA_MODEL_URI, 'isMemberOfCollection', 'fbauser' . $usernumber . ':collection');
+    //    break;
+    //  default:
+    //    break;
+    // }
+    //}
+    //$rel = $newobject->relationships;
+    //$rel->changeObjectID($newobject->id); //changes rels-ext only
+    //$ingested_object = $repository->ingestObject($newobject);
+    //$ingested_object->relationships->add(RELS_EXT_URI, 'isMemberOfCollection', $selectedcollection);
+    //old dc:identifier pid is still in there
+    //COLS datastreams still have info:fedora/dtcan:13/OBJ1 and <dc:identifier>dtcan:13-1-0</dc:identifier>
+    //RELS-INT still has <relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-1"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-2"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-3"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-4"/>
+    //}
 
 
     $redirecturl = $base_root . $base_path . 'fedora/repository/' . $pid;
@@ -962,6 +935,93 @@ class PublishObjectMetadataForm {
     else {
       $this->modifyInlineDatastream($dom, $pid, $dsid, $label, $mime_type);
     }
+  }
+
+  function getParentConcepts($pid) {
+    $repository = tuque_wrapper_get_repository_instance();
+    $ri = $repository->ri;
+
+    $conceptrdfs = sidora_return_forward_fba_concept_rdfs();
+    $arraycount = count($conceptrdfs);
+
+    $query = 'select ?subject where {';
+    foreach ($conceptrdfs as $key => $keyvalue) {
+      $query .= '{?subject <info:fedora/fedora-system:def/relations-external#' . $keyvalue . '> <info:fedora/' . $pid . '>}';
+      if ($key < $arraycount - 1) { //as arraycounts don't start at zero
+        $query .= ' UNION ';
+      }
+    }
+    $query .= '}';
+
+    $sparql_query_results = $ri->sparqlQuery($query);
+    foreach ($sparql_query_results as $sparql_query_result) {
+      $parentconcepts[] = $sparql_query_result[subject][value];
+    }
+
+
+    return $parentconcepts;
+  }
+
+  function getChildResources($pid) {
+    //Does this object have any resources?
+
+    $resourcerdfs = sidora_return_forward_fba_resource_rdfs();
+    $arraycount = count($resourcerdfs);
+
+    $query = 'select ?object where {';
+    foreach ($resourcerdfs as $key => $keyvalue) {
+      $query .= '{<info:fedora/' . $pid . '> <info:fedora/fedora-system:def/relations-external#' . $keyvalue . '> ?object}';
+      if ($key < $arraycount - 1) { //as arraycounts don't start at zero
+        $query .= ' UNION ';
+      }
+    }
+    $query .= '}';
+
+    $repository = tuque_wrapper_get_repository_instance();
+    $ri = $repository->ri;
+
+    $sparql_query_results = $ri->sparqlQuery($query);
+    foreach ($sparql_query_results as $sparql_query_result) {
+      $childresources[] = $sparql_query_result[object][value];
+    }
+
+    return $childresources;
+  }
+
+  function getPublishCollectionsList() {
+
+    $repository = tuque_wrapper_get_repository_instance();
+    $ri = $repository->ri;
+
+    $query = 'select ?subject where {?subject <info:fedora/fedora-system:def/relations-external#isMemberOfCollection> <info:fedora/dtc:collection>}';
+
+    $sparql_query_results = $ri->sparqlQuery($query);
+    foreach ($sparql_query_results as $sparql_query_result) {
+      if (strpos($sparql_query_result[subject][value], ':root') === FALSE) { //Bodged code to remove roots for now until MH decides final format
+        $futurerels[$sparql_query_result[subject][value]] = $sparql_query_result[subject][value];
+      }
+    }
+    return $futurerels;
+  }
+
+  //tree construction algo
+  function buildTree($pid, &$elements, $parent_id = 0) {
+    $parentlist = $this->getParentConcepts($pid);
+    $branch = array();
+    foreach ($parentlist as $node) {
+      //$nodeparent = $this->getParentConcepts($node);
+      if (strcmp($node, $parent_id) === 0) {
+        
+      }
+      else {
+        $children = $this->buildTree($node, &$elements, $parent_id);
+        if ($children) {
+          $branch[] = $children[0];
+        }
+        $branch[] = $node;
+      }
+    }
+    return $branch;
   }
 
 }

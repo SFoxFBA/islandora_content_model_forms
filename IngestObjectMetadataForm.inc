@@ -476,44 +476,42 @@ class IngestObjectMetadataForm {
       $transform = islandora_content_model_get_transform($content_model_pid, $form_name);
 
       /**
-       *
-       * FBA MODIFICATION BY NBYWELL on 06/03/2014. Check content of
-       * the 'rdf_relationships' variable which triggers the
-       * Object Linker functionality.
-       *
-       */
+      *
+      * FBA MODIFICATION BY NBYWELL on 06/03/2014. Check content of
+      * the 'rdf_relationships' variable which triggers the
+      * Object Linker functionality.
+      *
+      */
+
       module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
       $duplicateEntryMsg = NULL;
 
       /**
-       *
-       * This is a check to determine if an entry already exists
-       * in the current collection.
-       */
+      *
+      * This is a check to determine if an entry already exists
+      * in the current collection.
+      */
+
       switch ($collection_pid) {
         // List of collections in which duplicates are not permitted.
         case "fba:vocabpref_collection":
         case "fba:vocabnonpref_collection":
         case "fba:geopref_collection":
-        case "fba:geononpref_collection":
-
+        case "fba:geononpref_collection": {
           $sparqlQuery = 'SELECT ?title ?pid WHERE { ?pid <http://purl.org/dc/elements/1.1/title> ?title; <fedora-model:state> <fedora-model:Active>; <fedora-rels-ext:isMemberOfCollection> <info:fedora/' . $collection_pid . '> FILTER regex(str(?title), "^' . $label . '$", "i") } LIMIT 10';
           $duplicateEntryMsg = check_for_duplicate_label($label, $sparqlQuery);
-          break;
+          break; }
         default:
-          break;
       }
 
       if ($duplicateEntryMsg) {
         drupal_set_message($duplicateEntryMsg);
-      }
-      else {
+      } else {
         if (variable_get('rdf_relationships', NULL)) {
           preprocess_link_data($document);
         }
         $foxml = new FOXML($label, $pid, $dsid, $content_model_pid, $collection_pid, $relationship, $ingest_file_location, $document, $transform, $state);
         $foxml->ingest();
-        /* SFOX need to blank out all dc datastream values for now, so that they don't get indexed ?? */
 
         /*
           $connection = islandora_get_tuque_connection();
