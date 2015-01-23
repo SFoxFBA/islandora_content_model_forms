@@ -139,7 +139,8 @@ class EditObjectMetadataForm {
     $params = array('pid' => $pid, 'dsID' => $dsid, 'asOfDateTime' => "");
     try {
       $object = $client->__soapCAll('getDatastreamDissemination', array('parameters' => $params));
-    } catch (Exception $e) {
+    }
+    catch (Exception $e) {
       return NULL;
     }
     return trim($object->dissemination->stream);
@@ -190,7 +191,7 @@ class EditObjectMetadataForm {
         $label_field_text = str_replace("'", "", $label_field_text);
         if ($subarray) {
           if (array_key_exists($label_field_text, $subarray)) {
-              $subarray = $subarray[$label_field_text];
+            $subarray = $subarray[$label_field_text];
           }
         }
         else {
@@ -230,14 +231,13 @@ class EditObjectMetadataForm {
     $doc = $xml_form->submit($form, $form_state);
     $document = $doc->document;
 
-   /**
-    *
-    * FBA MODIFICATION BY NBYWELL on 06/03/2014. Check the content of the
-    * 'rdf_relationships' variable which triggers
-    * the Object Linker functionality.
-    *
-    */
-
+    /**
+     *
+     * FBA MODIFICATION BY NBYWELL on 06/03/2014. Check the content of the
+     * 'rdf_relationships' variable which triggers
+     * the Object Linker functionality.
+     *
+     */
     if (variable_get('rdf_relationships', NULL)) {
       module_load_include('inc', 'islandora_content_model_forms', 'FOXML');
       module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
@@ -245,7 +245,7 @@ class EditObjectMetadataForm {
     }
     $this->modifyDatastream($document, $pid, $dsid, "$dsid Record", 'text/xml');
     if (variable_get('rdf_relationships', NULL)) {
-      process_links($form,$form_state,true);
+      process_links($form, $form_state, true);
     }
     return $document;
   }
@@ -315,7 +315,7 @@ class EditObjectMetadataForm {
   private function isDatastreamManaged($pid, $dsid) {
     $fedora_item = new Fedora_Item($pid);
     $datastream = $fedora_item->get_datastream($dsid);
-    if($datastream) {
+    if ($datastream) {
       return $datastream->controlGroup == 'M';
     }
     else {

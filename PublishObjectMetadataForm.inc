@@ -60,7 +60,6 @@ class PublishObjectMetadataForm {
     $olformdatabase = XMLFormDatabase::Get($object_linker_form_name);
     $object_linker = new XMLFormDefinition($olformdatabase);
     $object_linker_definition = $object_linker->definition;
-    //$test = $object_linker_definition->saveXML();
     $object_linker_form = $object_linker->getForm();
     //compile the list of form fields that have "fieldvalidator" as an attribute
 
@@ -70,12 +69,12 @@ class PublishObjectMetadataForm {
 
     $validationobjects = array();
     for ($i = 0; $i < $rescount; $i++) {
-//need to get 'name' from topmost element in nodepath
+      //need to get 'name' from topmost element in nodepath
       $node = $results->item($i);
       $nodepath = $node->getNodePath();
       $name = $node->nodeName;
       $val = $node->nodeValue;
-//try and find actions/read/path
+      //try and find actions/read/path
       $readpos = strpos($nodepath, 'attributes/fieldvalidator');
       $readprefix = substr($nodepath, 0, $readpos);
       $readpath = $readprefix . '/actions/read/path';
@@ -110,10 +109,10 @@ class PublishObjectMetadataForm {
       }
       $validationobjects[] = array($nodepath, $titlevalitem, $val, $readvalitem, $xpathresulttext);
     }
-//set up array of grouped fields
+    //set up array of grouped fields
     foreach ($validationobjects as $valobjectkey => $validationobject) {
       if (ctype_upper(substr($validationobject[2], 1, 1))) {
-//Upper case second letter, this field is part of a group
+        //Upper case second letter, this field is part of a group
         $fieldgroups[substr($validationobject[2], 1, 1)][] = $valobjectkey;
       }
       else
@@ -132,6 +131,85 @@ class PublishObjectMetadataForm {
     return $validationobjects;
   }
 
+  public function getMandatoryFields($pid) {
+    module_load_include('inc', 'xml_form_builder', 'XMLFormDatabase');
+    module_load_include('inc', 'xml_form_api', 'XMLForm');
+    module_load_include('inc', 'xml_form_api', 'XMLFormDefinition');
+    module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
+
+
+    module_load_include('inc', 'fedora_repository', 'api/fedora_utils');
+    module_load_include('inc', 'fedora_repository', 'ObjectHelper');
+
+    $objectHelper = new ObjectHelper();
+    $content_models = $objectHelper->get_content_models_list($pid);
+    foreach ($content_models as $content_model) {
+      if (strpos($content_model->pid, 'si:') === FALSE) { //SFOX horrible hack to ignore si content models
+        $content_model_pid = $content_model->pid;
+      }
+    }
+    $object_linker_form_name = get_object_linker_form_name($pid, $content_model_pid);
+    $olformdatabase = XMLFormDatabase::Get($object_linker_form_name);
+    $object_linker = new XMLFormDefinition($olformdatabase);
+    $object_linker_definition = $object_linker->definition;
+    //$test = $object_linker_definition->saveXML();
+    //$object_linker_form = $object_linker->getForm();
+    //compile the list of form fields that have "fieldvalidator" as an attribute
+
+    $xpath = new DOMXPath($object_linker_definition);
+    $results = $xpath->query("//mandatory");
+    $rescount = $results->length;
+
+    $mandatoryobjects = array();
+    for ($i = 0; $i < $rescount; $i++) {
+      //need to get 'name' from topmost element in nodepath
+      $node = $results->item($i);
+      $nodepath = $node->getNodePath();
+      //$name = $node->nodeName;
+      //$val = $node->nodeValue;
+      //try and find actions/read/path
+      //$readpos = strpos($nodepath, 'attributes/fieldvalidator');
+      //$readpos = strpos($nodepath, 'properties/attributes/mandatory');
+      //$readprefix = substr($nodepath, 0, $readpos);
+      //$readpath = $readprefix . '/actions/read/path';
+      //$readval = $xpath->evaluate($readpath);
+      //$readvalitem = $readval->item(0)->nodeValue;
+      //remove the '/dtca:xxxx/' prefix
+      //$sxmldtca->registerXPathNamespace('dtca', 'http://fba.org.uk/schemas/dtca/1.0.0');
+      //$sxmldtca->registerXPathNamespace('gco', 'http://www.isotc211.org/2005/gco');
+      //$xpathresult = $sxmldtca->xpath($readvalitem);
+      //$xpathresulttext = (string) $xpathresult[0];
+
+      $pos = strpos($nodepath, 'properties/attributes/mandatory');
+      //$prefix = substr($nodepath, 0, $pos);
+      //$titlepath = $prefix . '/title';
+      //$titleval = $xpath->evaluate($titlepath);
+      //$titlevalitem = $titleval->item(0)->nodeValue;
+      //$continueloop = TRUE;
+
+      $prefix = substr($nodepath, 0, $pos - 1); //-1 to remove last slash
+      $namepath = 'string(' . $prefix . '/@name)';
+      $nameval = $xpath->evaluate($namepath);
+      //while (is_null($titlevalitem) && $continueloop) {
+      //  $pos = strrpos($prefix, 'children/element');
+      //  $prefix = substr($nodepath, 0, $pos);
+      //  if (strpos($prefix, 'element') === FALSE) {
+      //    $continueloop = FALSE;
+      //  }
+      //  else {
+      //    $titlepath = $prefix . '/title';
+      //    $titleval = $xpath->evaluate($titlepath);
+      //    $titlevalitem = $titleval->item(0)->nodeValue;
+      //  }
+      // }
+      //if (is_null($titlevalitem)) {
+      //  $titlevalitem = 'Warning - title field missing';
+      //}
+      $mandatoryobjects[] = $nameval;
+    }
+    return $mandatoryobjects;
+  }
+
   /**
    * Create page one.
    *
@@ -142,9 +220,11 @@ class PublishObjectMetadataForm {
    *
    * @return array
    */
-  public function createPageOne($pid, $client, array &$form_state) {
+  public function createPageOneOld($pid, $client, array &$form_state) {
+    module_load_include('inc', 'fedora_repository', 'ObjectHelper');
 
     global $user;
+
     $dtcadatastream = $this->getMetadata($pid, 'DTCA', $client);
     $sxmldtca = simplexml_load_string($dtcadatastream);
     $datasetfieldsrequiringvalidation = $this->getFieldsRequiringValidation($pid, $sxmldtca);
@@ -155,7 +235,6 @@ class PublishObjectMetadataForm {
     $objecttopublish = $repository->getObject($pid);
 
     $relationships = $objecttopublish->relationships->get('info:fedora/fedora-system:def/relations-external#', 'isMemberOfCollection');
-
     //Is this in an 'fbauserNN:collection'?
     $ismemberofusercollection = FALSE;
     foreach ($relationships as $relationship) {
@@ -170,15 +249,15 @@ class PublishObjectMetadataForm {
     }
 
     $ri = $repository->ri;
-    //Which parent activities have a Concept type relation to this object?
-    //This needs to be an (upwards) recursive loop stopping at fbauser<nn> level
+//Which parent activities have a Concept type relation to this object?
+//This needs to be an (upwards) recursive loop stopping at fbauser<nn> level
     $elements = array();
-    $parentconcepts = $this->buildTree($pid, $elements, $user->islandora_user_pid);
-    
-    //Does this object have any resources?
-    $childresources = $this->getChildResources($pid);
+    $parentconcepts = $this->buildParentTree($pid, $elements, $user->islandora_user_pid);
 
-    //Which collections can this object be published to?
+//Does this object have any resources?
+    $childresources = $this->getChildren($pid);
+
+//Which collections can this object be published to?
     /*    $query = 'select ?subject where {?subject <info:fedora/fedora-system:def/relations-external#isMemberOfCollection> <info:fedora/dtc:collection>}';
 
       $sparql_query_results = $ri->sparqlQuery($query);
@@ -193,7 +272,7 @@ class PublishObjectMetadataForm {
     //      $relsarray .= '<option value=' . $rel . '>' . $rel . '</option>';
     //    }
 
-    $currentrelstext = '<br/><h1>' . $pid . '</h1>';
+    $currentrelstext .= '<br/><h1>' . $pid . '</h1>';
     $currentrelstext .= '<br/>Currently in collection(s) <br/>';
     if ($currentrels) {
       foreach ($currentrels as $currentrel) {
@@ -204,12 +283,110 @@ class PublishObjectMetadataForm {
       $currentrelstext .= ' - none';
     }
     $currentrelstext .= '<br/>';
+    //check if the object's metadata has correctly completed all mandatory fields
+    //$dtcadatastream = $this->getMetadata($pid, 'DTCA', $client);
+    //$sxmldtca = simplexml_load_string($dtcadatastream);
+    $mandatoryfields = $this->getMandatoryFields($pid, $sxmldtca);
+    $emptyfieldcount = 0;
+    foreach ($mandatoryfields as $mandatoryfield) {
+      $nodetext = $mandatoryfield;
+      $nodeval = (string) $sxmldtca->{$nodetext};
 
-    //print out parent concepts
+      if (strlen($nodeval) === 0) {
+        $emptyfieldcount++;
+      }
+    }
+    $hasnoemptyfields = TRUE;
+    if ($emptyfieldcount > 0) {
+      $hasnoemptyfields = FALSE;
+    }
+
+//$dtcatitle = (string) $sxmldtca->title;
+//$dtcaabstract = (string) $sxmldtca->abstract;
+
+    $currentrelstext .= '<br/><h1>Missing Mandatory Metadata fields</h1><br/>';
+    $currentrelstext .= ' - Total: ' . $emptyfieldcount . '<br/>';
+
+//$currentrelstext .= 'Title - ';
+//if ($dtcatitle) {
+//  $currentrelstext .= $dtcatitle;
+// }
+//else {
+// $currentrelstext .= 'MISSING';
+//}
+//$currentrelstext .= '<br/>';
+//$currentrelstext .= 'Abstract - ';
+//if ($dtcaabstract) {
+//  $currentrelstext .= $dtcaabstract;
+// }
+//else {
+// $currentrelstext .= 'MISSING';
+// }
+    $currentrelstext .= '<br/>';
+
+    $currentrelstext .= '<br/><h1>Subject and Geovocab terms</h1><br/>';
+
+    $validgeosubjectkeywords = FALSE;
+    $dtcakeywords = $sxmldtca->keyword;
+    $numkeywords = $dtcakeywords->count();
+
+    $subjectkeywords = array();
+    $geokeywords = array();
+    $taxokeywords = array();
+//foreach ($dtcakeywords as $dtcakeyword) {
+    for ($i = 0; $i < $numkeywords; $i++) {
+      $keywordattrs = $dtcakeywords[$i]->attributes();
+      $keywordattrauthority = (string) $dtcakeywords[$i]->attributes()->authority;
+      $dtcakeywordchild = $dtcakeywords[$i]->children('http://www.isotc211.org/2005/gco');
+      $dtcacharstring = (string) $dtcakeywordchild->CharacterString;
+      switch ($keywordattrauthority) {
+        case 'fba subject': {
+            $subjectkeywords[] = $dtcacharstring;
+            break;
+          }
+        case 'fba geographic': {
+            $geokeywords[] = $dtcacharstring;
+            break;
+          }
+        case 'fba taxonomic': {
+            $taxokeywords[] = $dtcacharstring;
+            break;
+          }
+
+        default: {
+            break;
+          }
+      }
+    }
+//Now check if all those keywords are valid
+    $validsubjectkeywords = $validgeokeywords = $validtaxokeywords = TRUE;
+    foreach ($subjectkeywords as $keywordtofind) {
+      $validsubjectkeywords = $this->_sparql_title_search($keywordtofind);
+    }
+    foreach ($geokeywords as $keywordtofind) {
+      $validgeokeywords = $this->_sparql_title_search($keywordtofind);
+    }
+    foreach ($taxokeywords as $keywordtofind) {
+      $validtaxokeywords = $this->_sparql_title_search($keywordtofind);
+    }
+
+    $currentrelstext .= 'All Subject keywords found: ';
+    $currentrelstext .= ($validsubjectkeywords ? 'Yes' : 'No');
+    $currentrelstext .= '<br/><br/>';
+
+    $currentrelstext .= 'All Geographic keywords found: ';
+    $currentrelstext .= ($validgeokeywords ? 'Yes' : 'No');
+    $currentrelstext .= '<br/><br/>';
+
+    $currentrelstext .= 'All Taxonomic keywords found: ';
+    $currentrelstext .= ($validtaxokeywords ? 'Yes' : 'No');
+    $currentrelstext .= '<br/><br/>';
+
+//print out parent concepts
     if ($parentconcepts) {
       $currentrelstext .= '<br/><h2>Parent Concepts</h2>';
       foreach ($parentconcepts as $parentconcept) {
-        $currentrelstext .= '</br> - ' . $parentconcept;
+        $currentrelstext .= '</br> - ' . $parentconcept . ' and validation of these will appear here';
       }
     }
     else {
@@ -238,8 +415,8 @@ class PublishObjectMetadataForm {
         }
         $currentrelstext .= '<br/>';
 
-        // Need to confirm child resources have the correct number of inputs
-        // put a function in here to return the number of inputs maybe xpath on <DTCA datastream, dtca:input/<gco:CharacterString, <keyword authority
+// Need to confirm child resources have the correct number of inputs
+// put a function in here to return the number of inputs maybe xpath on <DTCA datastream, dtca:input/<gco:CharacterString, <keyword authority
         $dtcadatastream = $this->getMetadata($childresource, 'DTCA', $client);
 
         $sxmldtca = simplexml_load_string($dtcadatastream);
@@ -271,7 +448,7 @@ class PublishObjectMetadataForm {
                 break;
               }
             case 'dtcmt': {
-                $numinputmessage .= 'measurement has ' . $numinputs . ' input(s)<br/>';
+                $numinputmessage .= 'measurement has ' . $numinputs . ' input(s)';
                 if ($numinputs = 0) {
                   $validnumberofinputs[] = TRUE;
                   $numinputmessage .= ' - Passed<br/>';
@@ -283,7 +460,7 @@ class PublishObjectMetadataForm {
                 break;
               }
             case 'dtclr': {
-                $numinputmessage .= 'literature review has ' . $numinputs . ' input(s)<br/>';
+                $numinputmessage .= 'literature review has ' . $numinputs . ' input(s)';
                 if ($numinputs > 0) {
                   $validnumberofinputs[] = TRUE;
                   $numinputmessage .= ' - Passed<br/>';
@@ -295,7 +472,7 @@ class PublishObjectMetadataForm {
                 break;
               }
             case 'dtcsy': {
-                $numinputmessage .= 'synthesis has ' . $numinputs . ' input(s)<br/>';
+                $numinputmessage .= 'synthesis has ' . $numinputs . ' input(s)';
                 if ($numinputs > 2) {
                   $validnumberofinputs[] = TRUE;
                   $numinputmessage .= ' - Passed<br/>';
@@ -307,7 +484,7 @@ class PublishObjectMetadataForm {
                 break;
               }
             case 'dtcsi': {
-                $numinputmessage .= 'simulation has ' . $numinputs . ' input(s)<br/>';
+                $numinputmessage .= 'simulation has ' . $numinputs . ' input(s)';
                 if ($numinputs > 0) {
                   $validnumberofinputs[] = TRUE;
                   $numinputmessage .= ' - Passed<br/>';
@@ -324,7 +501,7 @@ class PublishObjectMetadataForm {
           $currentrelstext .= $numinputmessage;
         }
         else {
-//DTCA datastream is missing, so no validation required. For supplemantary files
+//DTCA datastream is missing, so no validation required. For supplementary files
           $validnumberofinputs[] = TRUE;
         }
       }
@@ -345,55 +522,14 @@ class PublishObjectMetadataForm {
     }
     $currentrelstext .= '<br/>';
 
-    //check if the object's metadata has correctly completed title and abstract fields
-    $dtcadatastream = $this->getMetadata($pid, 'DTCA', $client);
 
-    $sxmldtca = simplexml_load_string($dtcadatastream);
-
-    $dtcatitle = (string) $sxmldtca->title;
-    $dtcaabstract = (string) $sxmldtca->abstract;
-
-    $currentrelstext .= '<br/><h1>Metadata values</h1><br/>';
-    $currentrelstext .= 'DTCA title - ';
-    if ($dtcatitle) {
-      $currentrelstext .= $dtcatitle;
-    }
-    else {
-      $currentrelstext .= 'MISSING';
-    }
-    $currentrelstext .= '<br/>';
-    $currentrelstext .= 'DTCA abstract - ';
-    if ($dtcaabstract) {
-      $currentrelstext .= $dtcaabstract;
-    }
-    else {
-      $currentrelstext .= 'MISSING';
-    }
-    $currentrelstext .= '<br/>';
-    $currentrelstext .= '<br/><h1>Subject and Geovocab terms</h1><br/>';
-
-    $validgeosubjectkeywords = FALSE;
-    $dtcakeywords = $sxmldtca->keyword;
-    $numkeywords = $dtcakeywords->count();
-
-    foreach ($dtcakeywords as $dtcakeyword) {
-      $keywordattrs = $dtcakeyword->attributes();
-      foreach ($keywordattrs as $keywattr => $keywvalue) {
-        $keywvaluestring = (string) $keywvalue;
-      }
-      $dtcakeywordchild = $dtcakeyword->children('http://www.isotc211.org/2005/gco');
-      foreach ($dtcakeywordchild as $keycharstring => $sxekeyword) {
-        $sxekeywordstr = (string) $sxekeyword;
-//why is this not returning a string!?!?
-      }
-    }
-    if ($ismemberofusercollection && $parentconcepts && $csvallpresent && $dtcatitle && $dtcaabstract && $passedonallinputs && $validgeosubjectkeywords) {
+    if ($ismemberofusercollection && $parentconcepts && $csvallpresent && $hasnoemptyfields && $passedonallinputs && $validsubjectkeywords && $validgeokeywords && $validtaxokeywords) {
       $form = array(
         'currentcollections' => array(
           '#type' => 'markup',
           '#value' => $currentrelstext,
         ),
-        'publishcollections' => array(
+        'publishcollection' => array(
           '#type' => 'select',
           '#title' => t('Publish to collection'),
           '#options' => $remainingrels,
@@ -421,6 +557,398 @@ class PublishObjectMetadataForm {
   }
 
   /**
+   * Create page one.
+   *
+   * @param string $pid
+   * @param string $dsid
+   * @param SoapClient $client
+   * @param array $form_state
+   *
+   * @return array
+   */
+  public function createPageOne($pid, $client, array &$form_state) {
+    //module_load_include('inc', 'fedora_repository', 'ObjectHelper');
+    module_load_include('inc', 'fedora_repository', 'api/fedora_item');
+    module_load_include('inc', 'content_model_viewer', 'Collection');
+
+
+    global $user;
+
+    $elements = array();
+    //$parentconcepts = $this->buildParentTree($pid, $elements, $user->islandora_user_pid);
+    //Does this object have any resources?
+    $childresources = $this->buildChildrenTree($pid, $elements, $user->islandora_user_pid);
+
+    $fullpidlist = array_merge(array($pid), $childresources); //put the activity at the top, where it should logically appear
+    $currentrelstext = '<table>
+            <tr class="fbabordertop">
+                <td class="fbatype">Type</td>
+                <td class="fbatitle">Title</td>
+                <td class="fbafields">Missing Mandatory</td>
+                <td class="fbakeywordshead" colspan="3" align="center">Missing Keywords</td>
+                <td class="fbanuminputs">Number of inputs</td>
+                <td class="fbascope">In scope?</td>
+            </tr>
+            <tr class="fbaborderbottom">
+                <td class="fbatype">&nbsp;</td>
+                <td class="fbatitle">&nbsp;</td>
+                <td class="fbafields">Metadata fields</td>
+                <td class="fbakeywordssubject">Subject</td>
+                <td class="fbakeywordsgeo">Geographic</td>
+                <td class="fbakeywordstaxon">Taxonomic</td>
+                <td class="fbanuminputssmall">(Data Components only)</td>
+                <td class="fbascope">&nbsp;</td>
+            </tr>';
+    $inscopeflag = TRUE;
+    foreach ($fullpidlist as $objectpid) {
+      $hasnoemptyfields = TRUE;
+      $isinscope = TRUE;
+      $objtype = $this->_getType($objectpid);
+
+      $currentobject = islandora_object_load($objectpid);
+      $objlabel = $currentobject->label;
+
+      //check if the object's metadata has correctly completed all mandatory fields
+      $dtcadatastream = $this->getMetadata($objectpid, 'DTCA', $client);
+      $domdtca = new DOMDocument();
+      $domdtca->loadXML($dtcadatastream);
+      $test = $domdtca->saveXML();
+
+      $sxmldtca = simplexml_load_string($dtcadatastream);
+      $sxmlnamespaces = $sxmldtca->getNamespaces(TRUE); //some fields have namespaces, still need to be able to read them
+      foreach ($sxmlnamespaces as $nskey => $ns) {
+        $children = $sxmldtca->children($ns);
+        $$nskey = $children;
+        if ($nskey) {
+          $sxmldtca->registerXPathNamespace($nskey, $ns . '/');
+        }
+        else {
+          $sxmldtca->registerXPathNamespace('nskey', $ns . '/');
+        }
+      }
+      $mandatoryfields = $this->getMandatoryFields($objectpid);
+      $emptyfieldcount = 0;
+      foreach ($mandatoryfields as $mandatoryfield) {
+        $nodels = $domdtca->getElementsByTagName($mandatoryfield);
+        foreach ($nodels as $node) { //Does this need to be a loop?
+          $nodeval = $node->nodeValue;
+        }
+        if (strlen(trim($nodeval)) === 0) {
+          $emptyfieldcount++;
+        }
+      }
+      if ($emptyfieldcount > 0) {
+        $hasnoemptyfields = FALSE;
+        $emptyfieldcountstring = '<span style="color: red">' . $emptyfieldcount . '</span>';
+      }
+      else {
+        $emptyfieldcountstring = (string) $emptyfieldcount;
+      }
+
+
+      //check that all keywords are in the appropriate vocabulary
+      $dtcakeywords = $sxmldtca->keyword;
+      $numkeywords = $dtcakeywords->count();
+
+      $subjectkeywords = array();
+      $geokeywords = array();
+      $taxokeywords = array();
+      for ($i = 0; $i < $numkeywords; $i++) {
+        $keywordattrs = $dtcakeywords[$i]->attributes();
+        $keywordattrauthority = (string) $dtcakeywords[$i]->attributes()->authority;
+        $dtcakeywordchild = $dtcakeywords[$i]->children('http://www.isotc211.org/2005/gco');
+        $dtcacharstring = (string) $dtcakeywordchild->CharacterString;
+        if (strlen($dtcacharstring) > 0) {
+          switch ($keywordattrauthority) {
+            case 'fba subject': {
+                $subjectkeywords[] = $dtcacharstring;
+                break;
+              }
+            case 'fba geographic': {
+                $geokeywords[] = $dtcacharstring;
+                break;
+              }
+            case 'fba taxonomic': {
+                $taxokeywords[] = $dtcacharstring;
+                break;
+              }
+
+            default: {
+                break;
+              }
+          }
+        }
+      }
+      //Now check if all those keywords are valid
+      $validsubjectkeywords = $validgeokeywords = $validtaxokeywords = TRUE;
+      foreach ($subjectkeywords as $keywordtofind) {
+        $validsubjectkeywords = $this->_sparql_title_search($keywordtofind);
+      }
+      foreach ($geokeywords as $keywordtofind) {
+        $validgeokeywords = $this->_sparql_title_search($keywordtofind);
+      }
+      foreach ($taxokeywords as $keywordtofind) {
+        $validtaxokeywords = $this->_sparql_title_search($keywordtofind);
+      }
+
+      $missingsubjectkeywords = ($validsubjectkeywords ? 'No' : '<span style="color: red">Yes</span>');
+
+      $missinggeokeywords = ($validgeokeywords ? 'No' : '<span style="color: red">Yes</span>');
+
+      $missingtaxokeywords = ($validtaxokeywords ? 'No' : '<span style="color: red">Yes</span>');
+      // Need to confirm child resources have the correct number of inputs
+      // put a function in here to return the number of inputs maybe xpath on <DTCA datastream, dtca:input/<gco:CharacterString, <keyword authority
+
+      if ($sxmldtca) {
+        $sxmldtca->registerXPathNamespace('dtca', 'http://fba.org.uk/schemas/dtca/1.0.0');
+        $sxmldtca->registerXPathNamespace('gco', 'http://www.isotc211.org/2005/gco');
+        $xpathresult = $sxmldtca->xpath('//dtca:input/gco:CharacterString');
+        $numinputs = 0;
+        foreach ($xpathresult as $foundinput) {
+          if (strlen((string) $foundinput) > 0) {
+            $numinputs++;
+          }
+        }
+
+        $numinputmessage = '';
+        $pidns = substr($objectpid, 0, strpos($objectpid, ':'));
+        switch ($pidns) {
+          case 'dtcan': {
+              if ($numinputs > 1) {
+                $validnumberofinputs[] = TRUE;
+                $numinputmessage = $numinputs;
+              }
+              else {
+                $validnumberofinputs[] = FALSE;
+                $numinputmessage = '<span style="color: red">' . $numinputs . '</span>';
+              }
+              break;
+            }
+          case 'dtcmt': {
+              if ($numinputs == 0) {
+                $validnumberofinputs[] = TRUE;
+                $numinputmessage = $numinputs;
+              }
+              else {
+                $validnumberofinputs[] = FALSE;
+                $numinputmessage = '<span style="color: red">' . $numinputs . '</span>';
+              }
+              break;
+            }
+          case 'dtclr': {
+              if ($numinputs > 0) {
+                $validnumberofinputs[] = TRUE;
+                $numinputmessage = $numinputs;
+              }
+              else {
+                $validnumberofinputs[] = FALSE;
+                $numinputmessage = '<span style="color: red">' . $numinputs . '</span>';
+              }
+              break;
+            }
+          case 'dtcsy': {
+              if ($numinputs > 2) {
+                $validnumberofinputs[] = TRUE;
+                $numinputmessage = $numinputs;
+              }
+              else {
+                $validnumberofinputs[] = FALSE;
+                $numinputmessage = '<span style="color: red">' . $numinputs . '</span>';
+              }
+              break;
+            }
+          case 'dtcsi': {
+              if ($numinputs > 0) {
+                $validnumberofinputs[] = TRUE;
+                $numinputmessage = $numinputs;
+              }
+              else {
+                $validnumberofinputs[] = FALSE;
+                $numinputmessage = '<span style="color: red">' . $numinputs . '</span>';
+              }
+              break;
+            }
+          default:
+            break;
+        }
+      }
+      else {
+        //DTCA datastream is missing, so no validation required. For supplementary files
+        $validnumberofinputs[] = TRUE;
+      }
+
+      //all have to have valid number of inputs to pass
+      $passedonallinputs = TRUE;
+      if ($validnumberofinputs) { //are there any values to work on?
+        foreach ($validnumberofinputs as $passflag) {
+          if (!$passflag) {
+            $passedonallinputs = FALSE; //don't have to look for another Fail after first has been found
+            break;
+          }
+        }
+      }
+
+      //Needs a check in here to see if any of the datacomponents link to something
+      //out of scope, eg it's an input to another datacomponent
+      $object = islandora_object_load($objectpid);
+      $rels = $object->relationships;
+
+      $icios = $rels->get('http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/', 'isComponentInputOf');
+      $hdesign = $rels->get('http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/', 'hasDesign');
+      $hprot = $rels->get('http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/', 'hasProtocol');
+      $hdoc = $rels->get('http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/', 'hasDocumentation');
+      $scoperelations = array_merge($icios, $hdesign, $hprot, $hdoc);
+      foreach ($scoperelations as $scoperelation) {
+        $scopeobject = $scoperelation[object];
+        $scopevalue = $scopeobject[value];
+        if (!in_array($scopevalue, $fullpidlist)) {
+          $isinscope = FALSE;
+        }
+      }
+
+      $currentrelstext .= '<tr class="fbaborderbottom">
+                <td class="fbatype">' . $objtype . '</td>
+                <td class="fbatitle">' . $objlabel . '</td>
+                <td class="fbafields">' . $emptyfieldcountstring . '</td>
+                <td class="fbakeywordssubject">' . $missingsubjectkeywords . '</td>
+                <td class="fbakeywordsgeo">' . $missinggeokeywords . '</td>
+                <td class="fbakeywordstaxon">' . $missingtaxokeywords . '</td>
+                <td class="fbanuminputs">' . $numinputmessage . '</td>
+                <td class="fbascope">' . ($isinscope ? '&nbsp;' : '<span style="color: red"> X </span>') . '</td>
+            </tr>';
+
+      if (!$isinscope) {
+        $inscopeflag = FALSE; //a flag to say at least one object has been found to be out of scope
+      }
+    }
+
+    $currentrelstext .= '</table>';
+
+
+    if ($hasnoemptyfields &&
+        $passedonallinputs &&
+        $validsubjectkeywords &&
+        $validgeokeywords &&
+        $validtaxokeywords &&
+        $validnumberofinputs[0] &&
+        $validnumberofinputs[1] &&
+        $validnumberofinputs[2] &&
+        $inscopeflag) {
+
+      $currentrels = array();
+      $futurerels = array();
+      $objecttopublish = islandora_object_load($pid);
+      $relationships = $objecttopublish->relationships->get(RELS_EXT_URI, 'isMemberOfCollection');
+      //Is this in an 'fbauserNN:collection'?
+      foreach ($relationships as $relationship) {
+        $currentrels[$relationship[object][value]] = $relationship[object][value];
+      }
+      $futurerels = $this->getPublishCollectionsList();
+      $remainingrels = array_diff($futurerels, $currentrels); //Don't want to try and re-add it to an existing collection
+      $form = array(
+        'currentcollections' => array(
+          '#type' => 'markup',
+          '#value' => $currentrelstext,
+        ),
+        'publishcollection' => array(
+          '#type' => 'select',
+          '#title' => t('Publish to collection'),
+          '#options' => $remainingrels,
+        ),
+        'pidtopublish' => array(
+          '#type' => 'hidden',
+          '#value' => $pid,
+        ),
+        'submit' => array(
+          '#type' => 'submit',
+          '#submit' => array('fedora_repository_publish_qdc_form_submit'),
+          '#value' => 'Next'
+        )
+      );
+    }
+    else {
+      $currentrelstext .= '<tr class="fbaborderbottom">'
+          . '<td colspan="7"><br/>Some help text to go here to help users complete all the missing things above.</td>'
+          . '</tr>';
+      $currentrelstext .= '<tr class="fbaborderbottom">'
+          . '<td colspan="7"><br/>A <span style="color: red"> X </span> indicates that the object is linked as an input/protocol/design/document to an object outside the scope of this hierarchy.</td>'
+          . '</tr>'
+          . '</table>';
+      $form = array(
+        'currentcollections' => array(
+          '#type' => 'markup',
+          '#value' => $currentrelstext,
+        ),
+      );
+    }
+
+
+    return $form;
+  }
+
+  function _get_mandatory_field_and_values(&$element) {
+    $mandatoryvalue = $element['#attributes']['mandatory'];
+    if (strcmp($mandatoryvalue, '1') === 0) {
+      $title = $element['#title'];
+      //$value = $element something or other;
+      $results[$title] = $value;
+    }
+
+    foreach (element_children($element) as $key) {
+      $results .= _get_mandatory_field_and_values($element[$key]);
+    }
+
+    return $results;
+  }
+
+  function _sparql_title_search($title) {
+    $validkeywords = TRUE;
+
+    $queryprefix = 'select $subject from <#ri> where {?subject <http://purl.org/dc/elements/1.1/title> "';
+    $querysuffix = '" }';
+    $query = $queryprefix . $title . $querysuffix;
+    $sparqlresult = ObjectHelper::performRiQuery($query, 'sparql');
+
+    if (count($sparqlresult) === 0) {
+      $validkeywords = FALSE;
+    }
+    return $validkeywords;
+  }
+
+  /**
+   *
+   * @param type $pid
+   * @return type
+   * SFOX, copied from Collection.inc in Islandora Content Model Viewer and added concepts
+   */
+  private function _getType($pid) {
+    module_load_include('inc', 'fedora_repository', 'ObjectHelper');
+    $types = array(
+      'fba:activity_cmodel' => 'Activity',
+      'fba:dataset_cmodel' => 'Dataset',
+      'fba:analysis_cmodel' => 'Analysis',
+      'fba:measurement_cmodel' => 'Measurement',
+      'fba:simulation_cmodel' => 'Simulation',
+      'fba:synthesis_cmodel' => 'Synthesis',
+      'fba:litreview_cmodel' => 'Literature Review',
+      'fba:supp_basic_image_cmodel' => 'Image',
+      'fba:supp_large_image_cmodel' => 'Large Image',
+      'fba:supp_pdf_cmodel' => 'PDF',
+      'fba:supp_text_cmodel' => 'Text',
+      'fba:supp_excel_cmodel' => 'Excel',
+      'fba:supp_word_cmodel' => 'Word',
+    );
+    $object_helper = new ObjectHelper();
+    $content_models = $object_helper->get_content_models_list($pid);
+    foreach ($content_models as $content_model) {
+      if (isset($types[$content_model->pid])) {
+        return $types[$content_model->pid];
+      }
+    }
+    return 'Unknown';
+  }
+
+  /**
    * Create page two.
    *
    * @param string $pid
@@ -433,11 +961,26 @@ class PublishObjectMetadataForm {
   public function createPageTwo($pid, $client, array &$form_state) {
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
 
-    $licenceprivacytext = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Aliquam ipsum velit, viverra quis nunc at, efficitur efficitur risus. Plus text to explain licensing. <br/><br/>';
-    $selectedcollection = $form_state['values']['publishcollections'];
+    $licenceprivacytext = 'Text to explain licensing. <br/><br/>';
+    $selectedcollection = $form_state['values']['publishcollection'];
     $selectedpid = $form_state['values']['pidtopublish'];
     $licenceprivacytext .= $selectedpid . ' has been chosen for publishing to ' . $selectedcollection . '.<br/><br/>';
 
+    $item = new Fedora_Item('fbalicense:1');
+
+    $dc = $item->get_datastream_dissemination('DC');
+    $xml = simplexml_load_string($dc);
+    $dc = $xml->asXML();
+    $document = new DOMDocument();
+    $document->loadXML($dc);
+    $xpath = new DOMXPath($document);
+    $xpath->registerNamespace('dc', 'http://purl.org/dc/elements/1.1/');
+    $results = $xpath->query('//dc:rights');
+    $node = $results->item(0);
+    $licensetext = $node->textContent;
+
+
+    $licenceprivacytext .= 'The text of this license is:<br/>' . $licensetext . '<br/><br/>';
     $form = array(
       'currentcollections' => array(
         '#type' => 'markup',
@@ -447,6 +990,10 @@ class PublishObjectMetadataForm {
         '#type' => 'hidden',
         '#value' => $pid,
       ),
+      'acceptlicense' => array(
+        '#type' => 'checkbox',
+        '#title' => t('I agree to the license'),
+      ),
       'selectedcollection' => array(
         '#type' => 'hidden',
         '#value' => $selectedcollection,
@@ -454,7 +1001,7 @@ class PublishObjectMetadataForm {
       'submit' => array(
         '#type' => 'submit',
         '#submit' => array('fedora_repository_publish_qdc_form_submit'),
-        '#value' => 'Next'
+        '#value' => 'Next',
       )
     );
     $form['forms'] = array(
@@ -526,6 +1073,15 @@ class PublishObjectMetadataForm {
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
     module_load_include('inc', 'content_model_viewer', 'Collection');
 
+    $selectedcollection = $form_state['values']['selectedcollection'];
+
+    $batch = array(
+      'title' => t('First batch run'),
+      'file' => drupal_get_path('module', 'islandora_content_model_forms') . '/batchfunctions.inc',
+      'operations' => array(),
+      'finished' => '_finished',
+    );
+
     global $base_path;
     global $base_root;
     global $user;
@@ -540,115 +1096,62 @@ class PublishObjectMetadataForm {
     $repository = tuque_wrapper_get_repository_instance();
     $objecttopublish = $repository->getObject($selectedpid);
     //Find which descendants will need publishing
-    $collection = new Collection($selectedpid);
-    list($descendants, $totaldescs) = $collection->getMembers();
-    foreach ($descendants as $descendant) {
-      $descendantlist[] = $descendant['pid'];
+
+    $childresources = $this->buildChildrenTree($pid, $elements, $user->islandora_user_pid);
+
+    $clonelist = array_merge(array($pid), $childresources); //put the activity at the top, where it should logically appear
+    //enumerate through clone list to create new objects
+    $selectcollectionns = substr($selectedcollection, 0, strpos($selectedcollection, ':'));
+    foreach ($clonelist as $clonepid) {
+      $batch['operations'][] = array('cloneobject', array($clonepid, $selectcollectionns));
     }
-    //now find ancestors
-    $queryprefix = 'select $subject from <#ri> where { ?object <fedora-model:state> <fedora-model:Active>; {$subject <fedora-rels-ext:hasDataset> <info:fedora/';
-    $querysuffix = '>}}';
-    $query = $queryprefix . $selectedpid . $querysuffix;
-    $sparqlresult = ObjectHelper::performRiQuery($query, 'sparql');
+    batch_set($batch);
+    //SFOX bad hack to force the non graphical version of batch processing
+    //SFOX as sidora catches the url redirect which shows the percentage complete bar
+    $batch = & batch_get();
+    $batch['progressive'] = FALSE;
+    //end of bad hack
+    batch_process();
 
-    if ($sparqlresult) {
-      foreach ($sparqlresult as $key => $valuearray) {
-        if (strcmp($user_pid, $valuearray['subject']) != 0) { //the object might be nextmost level to user pid
-          $ancestorlist[] = $valuearray['subject']; //overall publishing list
-          $parentlist[] = $valuearray['subject']; //immediate parents
-        }
-      }
-    }//a check needs putting in here for no returned pids!
+    // run a second batch to correct all the RELS-EXTs
+    $batchresultsuccess = $_SESSION['my_batch_succeeded']; //check return results
+    $batchresult = $_SESSION['my_batch_results']; //check return results
+    //Another final batch job is required here to swap all the old and new pids in the new objects
+    $batchtidy['operations'][] = array('tidyuprelations', array($batchresult['success'], $selectcollectionns));
+    batch_set($batchtidy);
+    //SFOX bad hack to force the non graphical version of batch processing
+    //SFOX as sidora catches the url redirect which shows the percent complete bar
+    $batchtidy = & batch_get();
+    $batchtidy['progressive'] = FALSE;
+    //end of bad hack
+    batch_process();
 
-    if ($parentlist) {
-      $queryprefix = 'select $subject from <#ri> where { ?object <fedora-model:state> <fedora-model:Active>; {$subject <fedora-rels-ext:hasActivity> <info:fedora/';
-      foreach ($parentlist as $key => $parentpid) {
-        $founduser = 1;
-        //walk up each ancestral path, stopping at user level
-        $query = $queryprefix . $parentpid . $querysuffix;
-        while ($founduser == 1) {
-          $sparqlresult = ObjectHelper::performRiQuery($query, 'sparql');
-          $sparqlresultpid = $sparqlresult[0]['subject'];
-          $founduser = strcmp($user_pid, $sparqlresultpid);
-          if ($founduser == 1) {
-            $ancestorlist[] = $sparqlresultpid;
-          }
-          $query = $queryprefix . $sparqlresultpid . $querysuffix;
-        }
-      }
-    }
-    //Insert the dataset pid at the top of the list of objects to be processed
-    if ($ancestorlist) {
-      array_unshift($ancestorlist, $selectedpid);
-    }
-    else {
-      $ancestorlist[] = $selectedpid;
-    }
-
-    $clonelist = array_merge($descendantlist, $ancestorlist);
-
-    //enumerate through clone list to create new objects with prefix "dtcpub<usernumber>:<nnn>"
-    $numberrequired = count($clonelist);
-
-    //for ($i = 0; $i < $numberrequired; $i++) {
-    //$frompid = $clonelist[$i];
-    //$topid = $newpids[$i];
-    //$currentobject = $repository->getObject($frompid);
-    //$newobject = $repository->constructObject('dtcpub' . $usernumber);
-    //$newobject->label = $currentobject->label;
-    //foreach ($currentobject as $dsid => $content) {
-    //will need to go through relsext/relsint of new objects and put translated pids in to keep the inheritance correct.
-    //$newobject->ingestDatastream($content);
-    //$newds = $newobject[$dsid];
-    //$newds->relationships->changeObjectID($newobject->id);
-    //switch ($dsid) {
-    //  case 'RELS-EXT':
-    //    $rels = $currentobject->relationships->get();
-    //    $newds->relationships->remove(FEDORA_MODEL_URI, 'isMemberOfCollection', 'info:fedora/fbauser' . $usernumber . ':collection');
-    //    break;
-    //  case 'DC':
-    //$newds->relationships->remove(FEDORA_MODEL_URI, 'isMemberOfCollection', 'fbauser' . $usernumber . ':collection');
-    //    break;
-    //  default:
-    //    break;
-    // }
-    //}
-    //$rel = $newobject->relationships;
-    //$rel->changeObjectID($newobject->id); //changes rels-ext only
-    //$ingested_object = $repository->ingestObject($newobject);
-    //$ingested_object->relationships->add(RELS_EXT_URI, 'isMemberOfCollection', $selectedcollection);
-    //old dc:identifier pid is still in there
-    //COLS datastreams still have info:fedora/dtcan:13/OBJ1 and <dc:identifier>dtcan:13-1-0</dc:identifier>
-    //RELS-INT still has <relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-1"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-2"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-3"/><relsext:hasConstituent rdf:resource="info:fedora/dtcan:13/COLS1-4"/>
-    //}
-
-
-    $redirecturl = $base_root . $base_path . 'fedora/repository/' . $pid;
 
     $debugstring = '';
-    foreach ($clonelist as $clonepid) {
-      $debugstring.= $clonepid . ' ,<br/> ';
+    foreach ($batchresult['success'] as $result) {
+      $debugstring .= $result[0] . ' -> ' . $result[1] . ' -> ' . $result[2] . '<br/>';
     }
+    $redirecturl = $base_root . $base_path . 'fedora/repository/' . $pid;
+
     $form = array(
       'currentcollections' => array(
         '#type' => 'markup',
-        '#value' => 'These are the objects to be cloned/published: <br/>' . $debugstring,
-      ),
-      'pidtopublish' => array(
-        '#type' => 'hidden',
-        '#value' => $pid,
+        '#value' => 'These are the objects to be cloned/published to ' . $selectedcollection . ': <br/>' . $debugstring,
       ),
       'finish' => array(
         '#type' => 'markup',
         '#value' => '<a href=' . $redirecturl . ' target="_parent">Needs a link here to return to the object screen (the same as if cancel had been clicked)</a>',
+      ),
+      'pidtopublish' => array(
+        '#type' => 'hidden',
+        '#value' => $pid,
       ),
       'forms' => array(
         '#type' => 'hidden',
         '#value' => $form_state['values']['forms'],
       ),
     );
-//use this instead?     $form_state['redirect'] = $base_url . '/fedora/repository/' . $pid;
-
+    //use this instead?     $form_state['redirect'] = $base_url . '/fedora/repository/' . $pid;
     return $form;
   }
 
@@ -962,10 +1465,10 @@ class PublishObjectMetadataForm {
     return $parentconcepts;
   }
 
-  function getChildResources($pid) {
+  function getChildren($pid) {
     //Does this object have any resources?
 
-    $resourcerdfs = sidora_return_forward_fba_resource_rdfs();
+    $resourcerdfs = array_merge(sidora_return_forward_fba_concept_rdfs(), sidora_return_forward_fba_resource_rdfs());
     $arraycount = count($resourcerdfs);
 
     $query = 'select ?object where {';
@@ -1004,8 +1507,8 @@ class PublishObjectMetadataForm {
     return $futurerels;
   }
 
-  //tree construction algo
-  function buildTree($pid, &$elements, $parent_id = 0) {
+  //tree construction algorithm
+  function buildParentTree($pid, &$elements, $parent_id = 0) {
     $parentlist = $this->getParentConcepts($pid);
     $branch = array();
     foreach ($parentlist as $node) {
@@ -1014,11 +1517,34 @@ class PublishObjectMetadataForm {
         
       }
       else {
-        $children = $this->buildTree($node, &$elements, $parent_id);
+        $children = $this->buildParentTree($node, &$elements, $parent_id);
         if ($children) {
           $branch[] = $children[0];
         }
         $branch[] = $node;
+      }
+    }
+    return $branch;
+  }
+
+  function buildChildrenTree($pid, &$elements, $child_id = 0) {
+    $childlist = $this->getChildren($pid);
+    $branch = array();
+    if ($childlist) {
+      foreach ($childlist as $node) {
+        //$nodeparent = $this->getParentConcepts($node);
+        if (strcmp($node, $child_id) === 0) {
+          
+        }
+        else {
+          $children = $this->buildChildrenTree($node, &$elements, $child_id);
+          if ($children) {
+            foreach ($children as $child) {
+              $branch[] = $child;
+            }
+          }
+          $branch[] = $node;
+        }
       }
     }
     return $branch;

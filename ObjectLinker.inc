@@ -1254,12 +1254,14 @@ function register_xpath_namespaces(&$domxpath,&$namespaceInfo,$checkPrevious=fal
  * @param string $header
  *   The header of the list of links.
  * @param string $sparqlQuery
- *   The sparql query used to populate the lis
+ *   The sparql query used to populate the list
+ * @param string $clickable
+ *   Determines whether the values are clickable
  *  
  * @return
  *   Formatted list or empty string
  */
-function get_link_list($header, $sparqlQuery) {
+function get_link_list($header, $sparqlQuery, $clickable = true) {
   global $base_url;
   $sparql_field = <<<EOQ
 $sparqlQuery
@@ -1269,7 +1271,11 @@ EOQ;
     $formattedHtml = '<div style="clear:both"><p>' . $header;
     $formattedHtml .= '<ul style="list-style:none">';
     foreach ($queryResults as $result) {
-      $formattedHtml .= '<li>' . '<a href="' . $base_url . '/fedora/repository/' . $result['pid'] . '">' . $result['title'] . '</a></li>';
+      if ($clickable) {
+        $formattedHtml .= '<li>' . '<a href="' . $base_url . '/fedora/repository/' . $result['pid'] . '">' . $result['title'] . '</a></li>';
+      } else {
+        $formattedHtml .= '<li>&nbsp;' . $result['title'] . '</li>';
+      }
     }
     $formattedHtml .= '</ul></p></div>';
     return $formattedHtml;
@@ -1337,7 +1343,8 @@ EOQ;
  */
 function get_rdf_object_entries($subjectPid, $predicate, $limit, $returnType, $header) {
   $arrayType = 0;
-  $listType = 1;
+  $clickableListType = 1;
+  $nonClickableListType = 2;
   $noLimit = -1;
   $object = '*';
   $subject = '<info:fedora/' . $subjectPid . '>';
@@ -1362,8 +1369,10 @@ function get_rdf_object_entries($subjectPid, $predicate, $limit, $returnType, $h
     }
     if ($returnType == $arrayType) {
       return get_link_array($sparqlQuery);
+    } else if ($returnType == $clickableListType) {
+      return get_link_list($header, $sparqlQuery, true);
     } else {
-      return get_link_list($header, $sparqlQuery);
+      return get_link_list($header, $sparqlQuery, false);
     }
   } else {
     return NULL;
@@ -1398,7 +1407,8 @@ function get_rdf_object_entries($subjectPid, $predicate, $limit, $returnType, $h
  */
 function get_rdf_subject_entries($objectPid, $predicate, $limit, $returnType, $header) {
   $arrayType = 0;
-  $listType = 1;
+  $clickableListType = 1;
+  $nonClickableListType = 2;
   $noLimit = -1;
   $object = '<info:fedora/' . $objectPid . '>';
   $filterComponent = 'FILTER (sameTerm(?object,' . $object . '))';
@@ -1408,8 +1418,10 @@ function get_rdf_subject_entries($objectPid, $predicate, $limit, $returnType, $h
   }
   if ($returnType == $arrayType) {
     return get_link_array($sparqlQuery);
+  } else if ($returnType == $clickableListType) {
+    return get_link_list($header, $sparqlQuery, true);
   } else {
-    return get_link_list($header, $sparqlQuery);
+    return get_link_list($header, $sparqlQuery, false);
   }
 }
 

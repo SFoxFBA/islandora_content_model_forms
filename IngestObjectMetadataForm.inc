@@ -103,7 +103,8 @@ class IngestObjectMetadataForm {
       '#type' => 'fieldset',
       '#attributes' => array('class' => 'fedora_ingester'),
       '#id' => 'fedora_ingest_fieldset',
-      '#title' => t('Ingest digital object into %collection_label (@collection_pid), Step #1:', array('@collection_pid' => $collection_pid, '%collection_label' => $collection_label)),
+      //DTC-198 removed pid '#title' => t('Ingest digital object into %collection_label (@collection_pid), Step #1:', array('@collection_pid' => $collection_pid, '%collection_label' => $collection_label)),
+      '#title' => t('Ingest digital object, Step #1:'),
     );
 
     $form['indicator']['models'] = array(
@@ -476,22 +477,20 @@ class IngestObjectMetadataForm {
       $transform = islandora_content_model_get_transform($content_model_pid, $form_name);
 
       /**
-      *
-      * FBA MODIFICATION BY NBYWELL on 06/03/2014. Check content of
-      * the 'rdf_relationships' variable which triggers the
-      * Object Linker functionality.
-      *
-      */
-
+       *
+       * FBA MODIFICATION BY NBYWELL on 06/03/2014. Check content of
+       * the 'rdf_relationships' variable which triggers the
+       * Object Linker functionality.
+       *
+       */
       module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
       $duplicateEntryMsg = NULL;
 
       /**
-      *
-      * This is a check to determine if an entry already exists
-      * in the current collection.
-      */
-
+       *
+       * This is a check to determine if an entry already exists
+       * in the current collection.
+       */
       switch ($collection_pid) {
         // List of collections in which duplicates are not permitted.
         case "fba:vocabpref_collection":
@@ -506,7 +505,8 @@ class IngestObjectMetadataForm {
 
       if ($duplicateEntryMsg) {
         drupal_set_message($duplicateEntryMsg);
-      } else {
+      }
+      else {
         if (variable_get('rdf_relationships', NULL)) {
           preprocess_link_data($document);
         }
@@ -514,11 +514,7 @@ class IngestObjectMetadataForm {
         $foxml->ingest();
 
         /*
-          $connection = islandora_get_tuque_connection();
-          $repository = $connection->repository;
-          $repository = tuque_wrapper_get_repository_instance();
-
-          $fedora_object = $repository->getObject($pid);
+          $fedora_object = islandora_object_load($pid);
           $csdsid = 'CHILD_SECURITY';
           $csdatastream = isset($fedora_object[$csdsid]) ? $fedora_object[$csdsid] : $fedora_object->constructDatastream($csdsid);
           $csdatastream->label = 'CHILD_SECURITY';
