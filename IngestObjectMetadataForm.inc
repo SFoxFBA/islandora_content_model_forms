@@ -26,6 +26,9 @@ class IngestObjectMetadataForm {
   public function getPotentialContentModels($collection_pid, array &$form_state) {
     $potential_models = array();
 
+    $collection_policy = CollectionPolicy::loadFromCollection($collection_pid);
+    $content_models = $collection_policy->getContentModels();
+
     //Add models from collection policy.
     if (($collection_policy = CollectionPolicy::loadFromCollection($collection_pid)) !== FALSE && ($content_models = $collection_policy->getContentModels())) {
       $potential_models = array();
@@ -104,15 +107,15 @@ class IngestObjectMetadataForm {
       '#attributes' => array('class' => 'fedora_ingester'),
       '#id' => 'fedora_ingest_fieldset',
       //DTC-198 removed pid '#title' => t('Ingest digital object into %collection_label (@collection_pid), Step #1:', array('@collection_pid' => $collection_pid, '%collection_label' => $collection_label)),
-      '#title' => t('Ingest digital object, Step #1:'),
+      '#title' => t('Select the type and then click on the "Next" button:'),
     );
 
     $form['indicator']['models'] = array(
       '#type' => 'select',
-      '#title' => t('Content models available'),
+      '#title' => t('Data Component Type'),
       '#options' => $potential_models,
       '#default_value' => $selected_model,
-      '#description' => t('Content models define datastream composition, relationships between this and other content models, and the mandatory behaviors associated with each digital object.<br /> Additional information may be found <a href="https://wiki.duraspace.org/display/FEDORACREATE/Content+Models+Overview">here.</a> '),
+      '#description' => t(''),
       '#ahah' => array(
         'path' => 'islandora/form/update',
         'wrapper' => 'content-form-choice',
@@ -388,7 +391,7 @@ class IngestObjectMetadataForm {
 
     $relationship = NULL;
     $pid = NULL;
-    //SFOX
+    //SFOX add object to user's private collection
     $pidnamespace = fba_solution_pack_get_namespace_from_cmodel($content_model_pid);
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
     $pid = Fedora_Item::get_next_PID_in_namespace($pidnamespace);
@@ -402,7 +405,6 @@ class IngestObjectMetadataForm {
       $identifier_element->setAttribute('type', 'local');
       $mods_element->appendChild($identifier_element);
     }
-
 
     if (empty($relationship)) {
       if (!empty($form_state['storage']['parent_relation'])) {
@@ -449,6 +451,10 @@ class IngestObjectMetadataForm {
         $state = $form['#post']['active-toggle'] ? 'A' : 'I';
       }
 
+      //SFOX archival version number needs populating (0 for private version)
+      $docelval = $document->getElementsByTagName('archivalPublicationVersion');
+      $docelval->item(0)->nodeValue = 0;
+      //
       $form_state['values']['pid'] = $pid;
       // added ne functionality to static thumbnails to objects if values are provided in forms
       $module = isset($form_state['values']['module']) ? $form_state['values']['module'] : NULL;
@@ -497,10 +503,13 @@ class IngestObjectMetadataForm {
         case "fba:vocabnonpref_collection":
         case "fba:geopref_collection":
         case "fba:geononpref_collection": {
-          $sparqlQuery = 'SELECT ?title ?pid WHERE { ?pid <http://purl.org/dc/elements/1.1/title> ?title; <fedora-model:state> <fedora-model:Active>; <fedora-rels-ext:isMemberOfCollection> <info:fedora/' . $collection_pid . '> FILTER regex(str(?title), "^' . $label . '$", "i") } LIMIT 10';
-          $duplicateEntryMsg = check_for_duplicate_label($label, $sparqlQuery);
-          break; }
-        default:
+            $sparqlQuery = 'SELECT ?title ?pid WHERE { ?pid <http://purl.org/dc/elements/1.1/title> ?title; <fedora-model:state> <fedora-model:Active>; <fedora-rels-ext:isMemberOfCollection> <info:fedora/' . $collection_pid . '> FILTER regex(str(?title), "^' . $label . '$", "i") } LIMIT 10';
+            $duplicateEntryMsg = check_for_duplicate_label($label, $sparqlQuery);
+            break;
+          }
+        default: {
+            
+          }
       }
 
       if ($duplicateEntryMsg) {
@@ -512,17 +521,8 @@ class IngestObjectMetadataForm {
         }
         $foxml = new FOXML($label, $pid, $dsid, $content_model_pid, $collection_pid, $relationship, $ingest_file_location, $document, $transform, $state);
         $foxml->ingest();
-
-        /*
-          $fedora_object = islandora_object_load($pid);
-          $csdsid = 'CHILD_SECURITY';
-          $csdatastream = isset($fedora_object[$csdsid]) ? $fedora_object[$csdsid] : $fedora_object->constructDatastream($csdsid);
-          $csdatastream->label = 'CHILD_SECURITY';
-          $csdatastream->mimeType = 'datastream/mimetype';
-          $module_path = drupal_get_path('module', 'sidora');
-          $csdatastream->setContentFromFile($module_path . '/includes/child_security.xml');
-          $document->ingestDatastream($csdatastream);
-         */
+        /* SFOX need to blank out all dc datastream values for now, so that they don't get indexed ?? */
+       
         if (variable_get('rdf_relationships', NULL)) {
           process_links($form, $form_state, false);
         }
@@ -532,7 +532,6 @@ class IngestObjectMetadataForm {
     }
     $form_state['redirect'] = "fedora/repository/{$collection_pid}";
   }
-
 }
 
 function islandora_content_model_update_form_choice() {
