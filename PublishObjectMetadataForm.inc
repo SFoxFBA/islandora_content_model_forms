@@ -862,18 +862,8 @@ class PublishObjectMetadataForm {
       'finished' => '_finished',
     );
 
-
-    $user_data = unserialize($user->data);
-    $user_pid = $user_data['islandora_user_pid'];
-    $usernumber = substr($user_pid, strpos($user_pid, ':') + 1); //+1 to ignore the colon
-    //Add the relsext here.
-    $selectedpid = $form_state['values']['pidtopublish'];
     $selectedcollection = $form_state['values']['selectedcollection'];
-
-    $repository = tuque_wrapper_get_repository_instance();
-    $objecttopublish = $repository->getObject($selectedpid);
     //Find which descendants will need publishing
-
     $childresources = $this->buildChildrenTree($pid, $elements, $user->islandora_user_pid);
 
     $clonelist = array_merge(array($pid), $childresources); //put the activity at the top, where it should logically appear
@@ -884,6 +874,13 @@ class PublishObjectMetadataForm {
     $selectcollectionns = substr($selectedcollname, 0, strpos($selectedcollname, ':'));
     foreach ($clonelist as $clonepid) {
       $batch['operations'][] = array('cloneobject', array($clonepid, $selectcollectionns));
+      //Check which of these pids are datasets, as they will require DOI's
+      //The whole batch should fail if the DOI assignment is unsuccessful.
+      $namespace = substr($clonepid, 0, strpos($clonepid, ':'));
+      if (strcmp($namespace, 'dtcds') === 0) {
+        //create a batch operation to mint a DOI for this dataset
+        array_unshift($batch['operations'], array('mintdoi', array($clonepid, $selectcollectionns)));
+      }
     }
     batch_set($batch);
     //SFOX bad hack to force the non graphical version of batch processing
@@ -907,16 +904,16 @@ class PublishObjectMetadataForm {
     batch_process();
 
 
-    $debugstring = '';
+    $resultstring = '';
     foreach ($batchresult['success'] as $result) {
-      $debugstring .= $result[0] . ' -> ' . $result[1] . ' -> ' . $result[2] . '<br/>';
+      $resultstring .= $result[0] . ' -> ' . $result[1] . ' -> ' . $result[2] . '<br/>';
     }
     $redirecturl = $base_root . $base_path . 'fedora/repository/' . $pid;
 
     $form = array(
       'currentcollections' => array(
         '#type' => 'markup',
-        '#value' => 'These are the objects to be cloned/published to ' . $selectedcollection . ': <br/>' . $debugstring,
+        '#value' => 'These are the objects to be cloned/published to ' . $selectedcollection . ': <br/>' . $resultstring,
       ),
       'finish' => array(
         '#type' => 'markup',
