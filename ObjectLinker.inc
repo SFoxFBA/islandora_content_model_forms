@@ -1263,6 +1263,8 @@ function register_xpath_namespaces(&$domxpath,&$namespaceInfo,$checkPrevious=fal
  */
 function get_link_list($header, $sparqlQuery, $clickable = true) {
   global $base_url;
+  module_load_include('module', 'subpath_alias', 'subpath_alias');
+
   $sparql_field = <<<EOQ
 $sparqlQuery
 EOQ;
@@ -1272,8 +1274,14 @@ EOQ;
     $formattedHtml .= '<ul style="list-style:none">';
     foreach ($queryResults as $result) {
       if ($clickable) {
-        $formattedHtml .= '<li>' . '<a href="' . $base_url . '/fedora/repository/' . $result['pid'] . '">' . $result['title'] . '</a></li>';
-      } else {
+        //SFOX New code to apply the pathauto translation(s)
+        $path = 'fedora/repository/' . $result['pid'];
+        $original_path = 'fedora/repository/' . $result['pid'];
+        $options['language'] = 'en';
+        subpath_alias_url_outbound_alter($path, $options, $original_path);
+        $formattedHtml .= '<li>' . '<a href="' . $base_url . '/' . $path . '">' . $result['title'] . '</a></li>';
+      }
+      else {
         $formattedHtml .= '<li>&nbsp;' . $result['title'] . '</li>';
       }
     }
