@@ -4,9 +4,9 @@ function cloneobject($pid, $selectedcollection, &$context) {
   $policydsid = 'POLICY';
   $fedora_object = islandora_object_load($pid);
   $clonedobject = islandora_copy_object($fedora_object);
-//Need to ignore the POLICY datastream during cloning.
+  //Need to ignore the POLICY datastream during cloning.
   $clonedobject->purgeDatastream($policydsid);
-//need to change the objectId (pid) of the cloned object
+  //need to change the objectId (pid) of the cloned object
   $connection = islandora_get_tuque_connection();
   $repository = $connection->repository;
   $newpid = $repository->getNextIdentifier($selectedcollection);
@@ -14,15 +14,15 @@ function cloneobject($pid, $selectedcollection, &$context) {
 
   $ingestobject = islandora_add_object($clonedobject);
   if ($ingestobject) {
-//if the ingest works then
+    //if the ingest works then
     $ingestsuccessful = TRUE;
   }
   else {
-//if the ingest fails then
+    //if the ingest fails then
     $ingestsuccessful = FALSE;
   }
-//Remove the restrictive POLICY datastream, and replace with an open one,
-//dependant on the Metadata only flag.
+  //Remove the restrictive POLICY datastream, and replace with an open one,
+  //dependant on the Metadata only flag.
   $dtca = $ingestobject['DTCA'];
   $dtcacontent = $dtca->content;
   $dtcads = simplexml_load_string($dtcacontent);
@@ -40,7 +40,7 @@ function cloneobject($pid, $selectedcollection, &$context) {
   return;
 }
 
-function mintdoi($pid, $selectedcollection, &$context) {
+function mintdoi($pid, &$context) {
   module_load_include('module', 'islandora_doi', 'islandora_doi');
 
   $fedora_object = islandora_object_load($pid);
@@ -72,19 +72,16 @@ function mintdoi($pid, $selectedcollection, &$context) {
   $metadatadoi = islandora_doi_register_metadata($reformattedpid, $datacitexml);
 
   //2. Mint the DOI
-  $url = 'http://172.16.0.96/environmentdata.local/fedora/repository/' . $pid;
-  $minteddoi = islandora_doi_mint($reformattedpid, $url);
-  //3. Add the doi to <dc:identifier ="dcterms:DOI">10.5072/dtcds10</dc:identifier>
-  $ds = new DOMDocument();
-  $ds->loadXML($dccontent);
-  $idandscheme = $ds->createElement('dc:identifier', $metadatadoi);
-  $idandscheme->setAttribute('xsi:type', 'dcterms:DOI');
-  $oaidc = $ds->getElementsByTagNameNS('http://www.openarchives.org/OAI/2.0/oai_dc/', 'dc')->item(0);
-  $oaidc->appendChild($idandscheme);
-  $dc->content = $ds->saveXML();
-
-  $context['results']['success'][] = array($pid, $newpid, $ingestsuccessful);
-      //NEED SOME ERROR CHECKING IN HERE IN CASE THE METADATA OR MINTING FAILS!
+  $minteddoi = islandora_doi_mint($reformattedpid, $pid);
+  if ($minteddoi === FALSE) {
+    //minting has failed for some reason (check watchdog logs)
+  }
+  else {
+    //3. Add the doi to /dtca:Dataset/dtca:doi
+    $sxmldtca = new SimpleXMLElement($dtcacontent);
+    $sxmldtca->doi = $minteddoi;
+    $fedora_object['DTCA']->content = $sxmldtca->asXML();
+  }
   return;
 }
 
@@ -114,9 +111,9 @@ function create_published_xacml(stdClass $account = NULL) {
   $xacml = new Xacml();
   $xacml->managementRule->addUser(array('fedoraAdmin', $account->name));
   $xacml->managementRule->addRole(array('administrator'));
-//Removed next two lines, so all users can view unrestricted datastreams
-//$xacml->viewingRule->addUser(array('fedoraAdmin', $account->name));
-//$xacml->viewingRule->addRole(array('administrator'));
+  //Removed next two lines, so all users can view unrestricted datastreams
+  //$xacml->viewingRule->addUser(array('fedoraAdmin', $account->name));
+  //$xacml->viewingRule->addRole(array('administrator'));
   $xacml->datastreamRule->addDsid('RELS-INT');
   $xacml->datastreamRule->addDsid('TN');
   $xacml->datastreamRule->addDsid('EXIF');
@@ -138,8 +135,8 @@ function create_open_xacml(stdClass $account = NULL) {
   $xacml = new Xacml();
   $xacml->managementRule->addUser(array('fedoraAdmin', $account->name));
   $xacml->managementRule->addRole(array('administrator'));
-//$xacml->viewingRule->addUser(array('fedoraAdmin', $account->name));
-//$xacml->viewingRule->addRole(array('administrator'));
+  //$xacml->viewingRule->addUser(array('fedoraAdmin', $account->name));
+  //$xacml->viewingRule->addRole(array('administrator'));
   $xml = $xacml->getXmlString(TRUE);
   return $xml;
 }
@@ -175,7 +172,7 @@ function tidyuprelations($batchresults, $selectedcollectionns, &$context) {
             break;
           }
         case 'RELS-EXT': {
-//isMemberOfCollection fbauser<xxx>:collection needs swapping to dtc<xxxx>
+            //isMemberOfCollection fbauser<xxx>:collection needs swapping to dtc<xxxx>
             $rels = $object->relationships;
             $imocs = $rels->get(FEDORA_RELS_EXT_URI, 'isMemberOfCollection');
             foreach ($imocs as $imoc) {
@@ -188,10 +185,10 @@ function tidyuprelations($batchresults, $selectedcollectionns, &$context) {
                 $rels->add(FEDORA_RELS_EXT_URI, 'isMemberOfCollection', $selectedcollectionns . ':collection');
               }
             }
-//isComponentInputOf dtcan:xx needs swapping to the published (eg) analysis pid
+            //isComponentInputOf dtcan:xx needs swapping to the published (eg) analysis pid
             swaprelsvalues('http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/', 'isComponentInputOf', $batchresults, $object);
 
-//Handle hasXXXX relsext here
+            //Handle hasXXXX relsext here
             $allrdfs = array_merge(sidora_return_forward_fba_concept_rdfs(), sidora_return_forward_fba_resource_rdfs());
             foreach ($allrdfs as $allrdf) {
               swaprelsvalues(RELS_EXT_URI, $allrdf, $batchresults, $object);
@@ -199,13 +196,13 @@ function tidyuprelations($batchresults, $selectedcollectionns, &$context) {
             break;
           }
         case 'DTCA': {
-//the new objects archival version number needs setting to 1 greater 
-//than current highest
+            //the new objects archival version number needs setting to 1 greater 
+            //than current highest
             $dtca = $object['DTCA'];
             $dtcacontent = $dtca->content;
             $sxmldtca = new SimpleXMLElement($dtcacontent);
             $sxmldtca->archivalPublicationDate = date("Y-m-d H:i:s");
-//Version number needs to be taken from last published in the chain
+            //Version number needs to be taken from last published in the chain
             if (is_null($lastchainpid)) {
               $sxmldtca->archivalPublicationVersion++;
             }
@@ -222,12 +219,12 @@ function tidyuprelations($batchresults, $selectedcollectionns, &$context) {
             break;
           }
         case 'RELS-INT': {
-//change the rdf:description/rdf:about value.
+            //change the rdf:description/rdf:about value.
             $ri = $object['RELS-INT'];
             $fri = new IslandoraFedoraRelsInt($ri);
             $fri->changeObjectID($publicpid);
 
-//change the hasConstituent pid value, remembering that it has a suffix of (eg) /COLS-1-1
+            //change the hasConstituent pid value, remembering that it has a suffix of (eg) /COLS-1-1
             $ricontent = $ri->content;
             $newricontent = str_replace($privatepid, $publicpid, $ricontent);
             $object['RELS-INT']->content = $newricontent;
@@ -235,9 +232,9 @@ function tidyuprelations($batchresults, $selectedcollectionns, &$context) {
           }
         default: {
             if (strpos($dsid, 'COLS') !== FALSE) { //Could also be DTCA, POLICY, OBJ<n>
-//COLSx-x datastream
-//<rdf:description rdf:about> needs pid swapping
-//rdf:description/dc:identifier needs pid swapping out, noting that there's a suffix 
+              //COLSx-x datastream
+              //<rdf:description rdf:about> needs pid swapping
+              //rdf:description/dc:identifier needs pid swapping out, noting that there's a suffix 
               $ri = $object[$dsid];
               $ricontent = $ri->content;
               $newricontent = str_replace($privatepid, $publicpid, $ricontent);
@@ -246,7 +243,7 @@ function tidyuprelations($batchresults, $selectedcollectionns, &$context) {
           }
       }
     }
-//Need to add the hasPublishedVersion relsext now, to the last object in the chain
+    //Need to add the hasPublishedVersion relsext now, to the last object in the chain
     if (is_null($lastchainpid)) {
       $pidtoupdate = $privatepid;
       $pidtopointto = $publicpid;
@@ -270,7 +267,7 @@ function swaprelsvalues($namespace, $relation, $batchresults, $object) {
     $objvalue = $relobject[value];
     foreach ($batchresults as $translationpair) {
       if (strcmp($objvalue, $translationpair[0]) === 0) {
-//Can swap this over as there's a match
+        //Can swap this over as there's a match
         $rels->remove($namespace, $relation, $objvalue);
         $rels->add($namespace, $relation, $translationpair[1]);
       }

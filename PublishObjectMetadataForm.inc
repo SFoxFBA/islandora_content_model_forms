@@ -873,13 +873,13 @@ class PublishObjectMetadataForm {
 
     $selectcollectionns = substr($selectedcollname, 0, strpos($selectedcollname, ':'));
     foreach ($clonelist as $clonepid) {
-      $batch['operations'][] = array('cloneobject', array($clonepid, $selectcollectionns));
+      array_unshift($batch['operations'], array('cloneobject', array($clonepid, $selectcollectionns)));
+
       //Check which of these pids are datasets, as they will require DOI's
       //The whole batch should fail if the DOI assignment is unsuccessful.
       $namespace = substr($clonepid, 0, strpos($clonepid, ':'));
       if (strcmp($namespace, 'dtcds') === 0) {
-        //create a batch operation to mint a DOI for this dataset
-        array_unshift($batch['operations'], array('mintdoi', array($clonepid, $selectcollectionns)));
+        $pidstomint[] = $clonepid;
       }
     }
     batch_set($batch);
@@ -890,7 +890,7 @@ class PublishObjectMetadataForm {
     //end of bad hack
     batch_process();
 
-    //   run a second batch to correct all the RELS-EXTs
+    // run a second batch to correct all the RELS-EXTs
     $batchresultsuccess = $_SESSION['my_batch_succeeded']; //check return results
     $batchresult = $_SESSION['my_batch_results']; //check return results
     //Another final batch job is required here to swap all the old and new pids in the new objects
@@ -903,6 +903,26 @@ class PublishObjectMetadataForm {
     //end of bad hack
     batch_process();
 
+    // run a third batch to mint a doi for dataset(s)
+    foreach ($pidstomint as $i => $mintpid) {
+      foreach ($batchresult['success'] as $completedclone) {
+        if (strcmp($mintpid, $completedclone[0]) === 0) {
+          //create a batch operation to mint a DOI for this dataset
+          $pidtouse[] = $completedclone[1];
+        }
+      }
+    }
+    foreach ($pidtouse as $i => $mintpid) {
+      $batchmint['operations'][] = array('mintdoi', array($mintpid));
+    }
+
+    batch_set($batchmint);
+    //SFOX bad hack to force the non graphical version of batch processing
+    //SFOX as sidora catches the url redirect which shows the percent complete bar
+    $batchmint = & batch_get();
+    $batchmint['progressive'] = FALSE;
+    //end of bad hack
+    batch_process();
 
     $resultstring = '';
     foreach ($batchresult['success'] as $result) {
@@ -1286,7 +1306,7 @@ class PublishObjectMetadataForm {
     return $colllist;
   }
 
-//tree construction algorithm
+  //tree construction algorithm
   function buildParentTree($pid, &$elements, $parent_id = 0) {
     $parentlist = $this->getParentConcepts($pid);
     $branch = array();
