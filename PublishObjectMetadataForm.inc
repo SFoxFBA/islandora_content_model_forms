@@ -626,15 +626,15 @@ class PublishObjectMetadataForm {
     $remainingrels = array();
     switch ($user->name) {
       case 'avondtc' : {
-          $remainingrels[] = 'dtcavon:collection';
+          $remainingrels[] = 'dtceavon:collection';
           break;
         }
       case 'edendtc' : {
-          $remainingrels[] = 'dtcaeden:collection';
+          $remainingrels[] = 'dtceeden:collection';
           break;
         }
       case 'wensumdtc' : {
-          $remainingrels[] = 'dtcawensum:collection';
+          $remainingrels[] = 'dtcewensum:collection';
           break;
         }
       case 'fbadata' :
@@ -642,7 +642,7 @@ class PublishObjectMetadataForm {
       case 'SFox' :
       case 'mhaft' :
       case 'GRushworth': {
-          $remainingrels[] = 'fbads:collection';
+          $remainingrels[] = 'fbaeds:collection';
           break;
         }
       default : {
@@ -745,7 +745,8 @@ class PublishObjectMetadataForm {
     $selectedpid = $form_state['values']['pidtopublish'];
     $licenceprivacytext .= $selectedpid . ' has been chosen for publishing to ' . $selectedcollname . '.<br/><br/>';
 
-    $item = new Fedora_Item('fbalicence:1');
+    $licencepid = 'fbalicence:1';
+    $item = new Fedora_Item($licencepid);
 
     $dc = $item->get_datastream_dissemination('DC');
     $xml = simplexml_load_string($dc);
@@ -760,6 +761,7 @@ class PublishObjectMetadataForm {
 
 
     $licenceprivacytext .= 'The text of this licence is:<br/>' . $licencetext . '<br/><br/>';
+    $licenceprivacytext .= 'After clicking "Next" background processing will commence to publish all the objects you have selected. Some working is required here to say it will take a short time to complete<br/><br/>';
     $form = array(
       'currentcollections' => array(
         '#type' => 'markup',
@@ -775,7 +777,7 @@ class PublishObjectMetadataForm {
       ),
       'selectedcollection' => array(
         '#type' => 'hidden',
-        '#value' => $selectedcollection,
+        '#value' => $selectedcollname,
       ),
       'submit' => array(
         '#type' => 'submit',
@@ -790,6 +792,10 @@ class PublishObjectMetadataForm {
     $form['pid'] = array(
       '#type' => 'hidden',
       '#value' => $pid,
+    );
+    $form['licencepid'] = array(
+      '#type' => 'hidden',
+      '#value' => $licencepid,
     );
     return $form;
 
@@ -851,8 +857,8 @@ class PublishObjectMetadataForm {
     module_load_include('inc', 'fedora_repository', 'ObjectHelper');
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
     module_load_include('inc', 'content_model_viewer', 'Collection');
-    global $base_path;
-    global $base_root;
+    //global $base_path;
+    //global $base_root;
     global $user;
 
     $batch = array(
@@ -862,26 +868,43 @@ class PublishObjectMetadataForm {
       'finished' => '_finished',
     );
 
+
+    //$user_data = unserialize($user->data);
+    //$user_pid = $user_data['islandora_user_pid'];
+    //$usernumber = substr($user_pid, strpos($user_pid, ':') + 1); //+1 to ignore the colon
+    //Add the relsext here.
+    //$selectedpid = $form_state['values']['pidtopublish'];
+    $licencepid = $form_state['values']['licencepid'];
     $selectedcollection = $form_state['values']['selectedcollection'];
+
+    $repository = tuque_wrapper_get_repository_instance();
+    //$objecttopublish = $repository->getObject($selectedpid);
     //Find which descendants will need publishing
     $childresources = $this->buildChildrenTree($pid, $elements, $user->islandora_user_pid);
 
     $clonelist = array_merge(array($pid), $childresources); //put the activity at the top, where it should logically appear
+    $selectcollectionns = substr($selectedcollection, 0, strpos($selectedcollection, ':'));
+    array_unshift($batch['operations'], array('tagobjectforcloning', array($pid, $selectcollectionns, $licencepid, TRUE))); //TRUE as it's the root object being submitted
     //enumerate through clone list to create new objects
-    $remainingrels = $this->list_available_publication_collections($pid);
-    $selectedcollname = $remainingrels[$selectedcollection];
+    //$remainingrels = $this->list_available_publication_collections($pid);
+    //$selectedcollname = $remainingrels[$selectedcollection];
 
-    $selectcollectionns = substr($selectedcollname, 0, strpos($selectedcollname, ':'));
     foreach ($clonelist as $clonepid) {
-      array_unshift($batch['operations'], array('cloneobject', array($clonepid, $selectcollectionns)));
-
-      //Check which of these pids are datasets, as they will require DOI's
-      //The whole batch should fail if the DOI assignment is unsuccessful.
+      array_unshift($batch['operations'], array('tagobjectforcloning', array($clonepid, $selectcollectionns, $licencepid, FALSE)));
       $namespace = substr($clonepid, 0, strpos($clonepid, ':'));
       if (strcmp($namespace, 'dtcds') === 0) {
         $pidstomint[] = $clonepid;
       }
     }
+    $resultstring = 'These objects have been marked to be published by Repository Manager: <br/>';
+    foreach ($clonelist as $cloneobject) {
+      $resultstring .= ' - ' . $cloneobject . '<br/>';
+    }
+    $resultstring .= 'and these object(s) will be given DOIs: <br/>';
+    foreach ($pidstomint as $i => $pidtomint) {
+      $resultstring .= ' - ' . $pidtomint . '<br/>';
+    }
+
     batch_set($batch);
     //SFOX bad hack to force the non graphical version of batch processing
     //SFOX as sidora catches the url redirect which shows the percentage complete bar
@@ -890,54 +913,11 @@ class PublishObjectMetadataForm {
     //end of bad hack
     batch_process();
 
-    // run a second batch to correct all the RELS-EXTs
-    $batchresultsuccess = $_SESSION['my_batch_succeeded']; //check return results
-    $batchresult = $_SESSION['my_batch_results']; //check return results
-    //Another final batch job is required here to swap all the old and new pids in the new objects
-    $batchtidy['operations'][] = array('tidyuprelations', array($batchresult['success'], $selectcollectionns));
-    batch_set($batchtidy);
-    //SFOX bad hack to force the non graphical version of batch processing
-    //SFOX as sidora catches the url redirect which shows the percent complete bar
-    $batchtidy = & batch_get();
-    $batchtidy['progressive'] = FALSE;
-    //end of bad hack
-    batch_process();
-
-    // run a third batch to mint a doi for dataset(s)
-    foreach ($pidstomint as $i => $mintpid) {
-      foreach ($batchresult['success'] as $completedclone) {
-        if (strcmp($mintpid, $completedclone[0]) === 0) {
-          //create a batch operation to mint a DOI for this dataset
-          $pidtouse[] = $completedclone[1];
-        }
-      }
-    }
-    foreach ($pidtouse as $i => $mintpid) {
-      $batchmint['operations'][] = array('mintdoi', array($mintpid));
-    }
-
-    batch_set($batchmint);
-    //SFOX bad hack to force the non graphical version of batch processing
-    //SFOX as sidora catches the url redirect which shows the percent complete bar
-    $batchmint = & batch_get();
-    $batchmint['progressive'] = FALSE;
-    //end of bad hack
-    batch_process();
-
-    $resultstring = '';
-    foreach ($batchresult['success'] as $result) {
-      $resultstring .= $result[0] . ' -> ' . $result[1] . ' -> ' . $result[2] . '<br/>';
-    }
-    $redirecturl = $base_root . $base_path . 'fedora/repository/' . $pid;
 
     $form = array(
       'currentcollections' => array(
         '#type' => 'markup',
         '#value' => 'These are the objects to be cloned/published to ' . $selectedcollection . ': <br/>' . $resultstring,
-      ),
-      'finish' => array(
-        '#type' => 'markup',
-        '#value' => '<a href=' . $redirecturl . ' target="_parent">Needs a link here to return to the object screen (the same as if cancel had been clicked)</a>',
       ),
       'pidtopublish' => array(
         '#type' => 'hidden',
@@ -974,7 +954,9 @@ class PublishObjectMetadataForm {
    * @return array
    */
   public function create($pid, $client, array &$form_state) {
-    $page = $form_state['storage']['step'] = empty($form_state['storage']['step']) ? 1 : $form_state['storage']['step'];
+
+    $form_state['storage']['step'] = empty($form_state['storage']['step']) ? 1 : $form_state['storage']['step'];
+    $page = $form_state['storage']['step'];
     switch ($page) {
       case 1: {
           $form_state['storage']['xml'] = TRUE;
@@ -1302,7 +1284,7 @@ class PublishObjectMetadataForm {
   }
 
   static function getFBAPublishCollectionsList() {
-    $colllist = array('fbads:collection');
+    $colllist = array('fbaeds:collection');
     return $colllist;
   }
 

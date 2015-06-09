@@ -7,6 +7,7 @@
 /**
  * Modules
  */
+include_once drupal_get_path('module', 'islandora_content_model_forms') . '/OcrProcessor.inc';
 module_load_include('inc', 'php_lib', 'Array');
 
 /**

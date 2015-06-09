@@ -491,6 +491,8 @@ class IngestObjectMetadataForm {
        */
       module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
       $duplicateEntryMsg = NULL;
+      $ocrProcessingRequired = false;
+      $ocrProcessingActivated = false; // This variable will not longer be required once the processing has been fully tested.
 
       /**
        *
@@ -516,7 +518,27 @@ class IngestObjectMetadataForm {
         drupal_set_message($duplicateEntryMsg);
       }
       else {
+        // The ocrProcessingActivated condition has been included below
+        // to disable this functionality until it has been fully tested.
+        // The content_model_pid values will also need to be changed
+        // to values relevant to Sidora.
+        if ((!strcmp($content_model_pid, 'fba:supp_pdf_cmodel')) && $ocrProcessingActivated) {
+          /*
+          * Create a temporary directory in which to perform the
+          * OCR processing and copy the PDF file into it as the
+          * orginal is automatically removed as part of the
+          * ingestion process.
+          */
+          module_load_include('inc', 'islandora_content_model_forms', 'OcrProcessor');
+          $pdfFilePath=''; $escapedPdfFile = ''; $escapedPdfDirPath = ''; $tmpDir = '';
+          $tmpDirPath = ''; $concatOutputFilePath = ''; $ocrMsg = ''; $ocrProcessingRequired = true;
+          preprocess_pdf_file($ingest_file_location, $pdfFilePath, $escapedPdfFile, $escapedPdfDirPath, $tmpDir, $tmpDirPath, $ocrProcessingRequired, $ocrMsg);
+        }
+
         if (variable_get('rdf_relationships', NULL)) {
+          /*
+          * Pre-process Object Linking data.
+          */
           preprocess_link_data($document);
         }
         $foxml = new FOXML($label, $pid, $dsid, $content_model_pid, $collection_pid, $relationship, $ingest_file_location, $document, $transform, $state);
@@ -524,8 +546,24 @@ class IngestObjectMetadataForm {
         /* SFOX need to blank out all dc datastream values for now, so that they don't get indexed ?? */
        
         if (variable_get('rdf_relationships', NULL)) {
+          /*
+          * Create object-object links.
+          */
           process_links($form, $form_state, false);
         }
+
+        // The ocrProcessingActivated condition has been included
+        // below to disable this functionality until it has been
+        // fully tested.
+        if ($ocrProcessingRequired && $ocrProcessingActivated) {
+          /*
+          * Extract the text from the PDF in the temporary directory.
+          * directory, add it as an OCR datastream and then
+          * remove the temporary directory.
+          */
+          extractOcrFromPdf($pid, $pdfFilePath, $escapedPdfFile, $escapedPdfDirPath, $tmpDir, $tmpDirPath, $concatOutputFilePath, $ocrMsg);
+        }
+
         $_SESSION['fedora_ingest_files'] = '';
         $form_state['storage'] = NULL;
       }
