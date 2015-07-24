@@ -225,6 +225,8 @@ class PublishObjectMetadataForm {
     //module_load_include('inc', 'fedora_repository', 'ObjectHelper');
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
     module_load_include('inc', 'content_model_viewer', 'Collection');
+    module_load_include('inc', 'sidora', 'includes/fba');
+
     global $user;
     $elements = array();
     //Does this object have any resources?
@@ -281,9 +283,9 @@ class PublishObjectMetadataForm {
       $domdtca = new DOMDocument();
       $domdtca->loadXML($dtcadatastream);
       //test bit v
-      $test = $domdtca->saveXML();
-      $sxmldtca2 = simplexml_load_string($dtcadatastream);
-      $frv = $this->getFieldsRequiringValidation($objectpid, $sxmldtca2);
+      //$test = $domdtca->saveXML();
+      //$sxmldtca2 = simplexml_load_string($dtcadatastream);
+      //$frv = $this->getFieldsRequiringValidation($objectpid, $sxmldtca2);
       //test bit ^
       $sxmldtca = simplexml_load_string($dtcadatastream);
       $sxmlnamespaces = $sxmldtca->getNamespaces(TRUE); //some fields have namespaces, still need to be able to read them
@@ -308,7 +310,40 @@ class PublishObjectMetadataForm {
           $emptyfieldcount++;
         }
       }
-      if ($emptyfieldcount > 0) {
+
+      //Need to also check that at least one of the individual/corporate related
+      //parties is an Author/Deliverer/PhD Candidate/Project Scientist 
+      //(for datasets only)
+      $creatorlist = sidora_return_related_party_creators();
+      $foundacreator = FALSE;
+      foreach ($sxmldtca->relatedParty as $relparty) {
+        if ($foundacreator) {
+          break;
+        }
+        switch ($relparty['type']) {
+          case 'corporate': {
+              $role = (string) $relparty->corporateRole;
+              break;
+            }
+          case 'personal': {
+              $role = (string) $relparty->personalRole;
+              break;
+            }
+        }
+        $pidns = substr($objectpid, 0, strpos($objectpid, ':'));
+        if (strcmp($pidns, 'dtcds') === 0) {
+          if (!empty($role)) {
+            if (in_array($role, $creatorlist)) {
+              $foundacreator = TRUE;
+            }
+          }
+        }
+        else {
+          $foundacreator = TRUE; //only datasets need this check performed
+        }
+      }
+
+      if (($emptyfieldcount > 0) || ($foundacreator === FALSE)) {
         $hasnoemptyfields = FALSE;
         $emptyfieldcountstring = '<span style="color: red"> * </span>';
       }
@@ -383,10 +418,10 @@ class PublishObjectMetadataForm {
         }
 
         $numinputmessage = '&nbsp;';
-        $pidns = substr($objectpid, 0, strpos($objectpid, ':'));
+        //$pidns = substr($objectpid, 0, strpos($objectpid, ':'));
         switch ($pidns) {
           case 'dtcan': {
-              if ($numinputs > 1) {
+              if ($numinputs > 0) {
                 $validnumberofinputs[] = TRUE;
                 $numinputmessage = $numinputs;
               }
@@ -408,7 +443,7 @@ class PublishObjectMetadataForm {
               break;
             }
           case 'dtclr': {
-              if ($numinputs > 0) {
+              if ($numinputs >= 0) {
                 $validnumberofinputs[] = TRUE;
                 $numinputmessage = $numinputs;
               }
@@ -419,7 +454,7 @@ class PublishObjectMetadataForm {
               break;
             }
           case 'dtcsy': {
-              if ($numinputs > 2) {
+              if ($numinputs > 1) {
                 $validnumberofinputs[] = TRUE;
                 $numinputmessage = $numinputs;
               }
@@ -430,7 +465,7 @@ class PublishObjectMetadataForm {
               break;
             }
           case 'dtcsi': {
-              if ($numinputs > 0) {
+              if ($numinputs >= 0) {
                 $validnumberofinputs[] = TRUE;
                 $numinputmessage = $numinputs;
               }
@@ -486,7 +521,7 @@ class PublishObjectMetadataForm {
       //(including data components), which would class it has having an out of 
       //scope condition.
       $designrdfs = array('isComponentInputOf', 'hasDesign', 'hasProtocol', 'hasDocumentation');
-      $rdfstocheck = array_merge(sidora_return_forward_fba_concept_rdfs(), sidora_return_forward_fba_resource_rdfs(), $designrdfs);
+      $rdfstocheck = array_merge(sidora_return_fba_concept_rdfs(), sidora_return_fba_resource_rdfs(), $designrdfs);
       $rdfns = array_merge(sidora_return_fba_classes_namespaces(), sidora_return_fba_resources_namespaces());
 
       $subject = '*';
@@ -626,15 +661,15 @@ class PublishObjectMetadataForm {
     $remainingrels = array();
     switch ($user->name) {
       case 'avondtc' : {
-          $remainingrels[] = 'dtceavon:collection';
+          $remainingrels[] = 'dtcavon:collection';
           break;
         }
       case 'edendtc' : {
-          $remainingrels[] = 'dtceeden:collection';
+          $remainingrels[] = 'dtceden:collection';
           break;
         }
       case 'wensumdtc' : {
-          $remainingrels[] = 'dtcewensum:collection';
+          $remainingrels[] = 'dtcwensum:collection';
           break;
         }
       case 'fbadata' :
@@ -642,7 +677,7 @@ class PublishObjectMetadataForm {
       case 'SFox' :
       case 'mhaft' :
       case 'GRushworth': {
-          $remainingrels[] = 'fbaeds:collection';
+          $remainingrels[] = 'fbads:collection';
           break;
         }
       default : {
@@ -709,11 +744,11 @@ class PublishObjectMetadataForm {
       'fba:synthesis_cmodel' => 'Synthesis',
       'fba:litreview_cmodel' => 'Literature Review',
       'fba:supp_basic_image_cmodel' => 'Image',
-      'fba:supp_large_image_cmodel' => 'Large Image',
       'fba:supp_pdf_cmodel' => 'PDF',
       'fba:supp_text_cmodel' => 'Text',
       'fba:supp_excel_cmodel' => 'Excel',
       'fba:supp_word_cmodel' => 'Word',
+        //'fba:supp_large_image_cmodel' => 'Large Image',
     );
     $object_helper = new ObjectHelper();
     $content_models = $object_helper->get_content_models_list($pid);
@@ -737,6 +772,7 @@ class PublishObjectMetadataForm {
    */
   public function createPageTwo($pid, $client, array &$form_state) {
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
+    module_load_include('inc', 'fedora_repository', 'api/tuque');
 
     $licenceprivacytext = 'Text to explain licensing. <br/><br/>';
     $selectedcollection = $form_state['values']['publishcollection'];
@@ -746,19 +782,10 @@ class PublishObjectMetadataForm {
     $licenceprivacytext .= $selectedpid . ' has been chosen for publishing to ' . $selectedcollname . '.<br/><br/>';
 
     $licencepid = 'fbalicence:1';
-    $item = new Fedora_Item($licencepid);
 
-    $dc = $item->get_datastream_dissemination('DC');
-    $xml = simplexml_load_string($dc);
-    $dc = $xml->asXML();
-    $document = new DOMDocument();
-    $document->loadXML($dc);
-    $xpath = new DOMXPath($document);
-    $xpath->registerNamespace('dc', 'http://purl.org/dc/elements/1.1/');
-    $results = $xpath->query('//dc:rights');
-    $node = $results->item(0);
-    $licencetext = $node->textContent;
-
+    $fedora_object = islandora_object_load($licencepid);
+    $licence = $fedora_object['LICENCE'];
+    $licencetext = $licence->content;
 
     $licenceprivacytext .= 'The text of this licence is:<br/>' . $licencetext . '<br/><br/>';
     $licenceprivacytext .= 'After clicking "Next" background processing will commence to publish all the objects you have selected. Some working is required here to say it will take a short time to complete<br/><br/>';
@@ -1223,7 +1250,7 @@ class PublishObjectMetadataForm {
     $repository = tuque_wrapper_get_repository_instance();
     $ri = $repository->ri;
 
-    $conceptrdfs = sidora_return_forward_fba_concept_rdfs();
+    $conceptrdfs = sidora_return_fba_concept_rdfs();
     $arraycount = count($conceptrdfs);
 
     $query = 'select ?subject where {';
@@ -1247,7 +1274,7 @@ class PublishObjectMetadataForm {
   function getChildren($pid) {
     //Does this object have any resources?
 
-    $resourcerdfs = array_merge(sidora_return_forward_fba_concept_rdfs(), sidora_return_forward_fba_resource_rdfs());
+    $resourcerdfs = array_merge(sidora_return_fba_concept_rdfs(), sidora_return_fba_resource_rdfs());
     $arraycount = count($resourcerdfs);
 
     $query = 'select ?object where {';
@@ -1284,7 +1311,7 @@ class PublishObjectMetadataForm {
   }
 
   static function getFBAPublishCollectionsList() {
-    $colllist = array('fbaeds:collection');
+    $colllist = array('fbads:collection');
     return $colllist;
   }
 

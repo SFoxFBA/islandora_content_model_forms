@@ -8,7 +8,7 @@ function tagobjectforcloning($pid, $selectedcollection, $licencepid, $isrootelem
   $dtcacontent = $dtca->content;
   $dtcads = simplexml_load_string($dtcacontent);
 
-  $dtcads->archivalPublicationVersion++;
+  //$dtcads->archivalPublicationVersion++;
 
   $nowdate = sprintf("%sT%s.000Z", date("Y-m-d"), date("H:i:s"));
   $dtcads->archivalPublicationDate = $nowdate;
@@ -19,7 +19,7 @@ function tagobjectforcloning($pid, $selectedcollection, $licencepid, $isrootelem
   else {
     $dtcads->archivalPublicationState = 'submitted';
   }
-  $dtcads->archivalPublicationLicensePid = $licencepid;
+  $dtcads->archivalPublicationLicencePid = $licencepid;
   $dtcads->archivalPublicationCollection = $selectedcollection;
   $fedora_object['DTCA']->content = $dtcads->asXML();
 }

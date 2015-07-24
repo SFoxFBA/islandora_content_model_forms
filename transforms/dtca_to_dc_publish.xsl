@@ -277,7 +277,7 @@
   </xsl:template>
 
   <xsl:template name="additions">
-    <dc:publisher>FBA</dc:publisher>
+    <dc:publisher>Freshwater Biological Association</dc:publisher>
   </xsl:template>
   
   <xsl:template name="formatDate">
