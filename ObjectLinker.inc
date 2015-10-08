@@ -1,9 +1,10 @@
 <?php
+
 /**
  * @file
  * @author Nicholas Bywell of the Freshwater Biological Association (FBA).
  *
- * This file contains the bulk of the functions that handle Object Linking
+ * This file contains most of the functions that handle Object Linking
  * in XML-Form functionality.
  * It uses some of the ontology processing functionality developed by
  * Giancoralo Birello of CNR-Ceris and Rosemary Le Faive of McGill University
@@ -21,10 +22,8 @@
  *
  * @param DOMDocument $definition
  *   The Datastream XML that may contain data to trigger RDF linking.
- *
  * @return
- *   Modifications to the parameter passed by reference.
- *   Setting the content of the 'rdf_relationships' variable.
+ *   None
  */
 function preprocess_link_data(DOMDocument &$document) {
   $namespacePrefixesRegistered = array();
@@ -37,7 +36,7 @@ function preprocess_link_data(DOMDocument &$document) {
   foreach ($rdf_relationships as $rdf_relationship) {
     $subjectXpathDataSearch = $rdf_relationship['subject_xpath_data_search'];
     if (strlen($subjectXpathDataSearch) > 0) {
-      register_xpath_namespaces($domxpath,$rdf_relationship['subject_namespace_info'], $checkPreviousNamespacePrefixes, $namespacePrefixesRegistered);
+      register_xpath_namespaces($domxpath, $rdf_relationship['subject_namespace_info'], $checkPreviousNamespacePrefixes, $namespacePrefixesRegistered);
       $queryResults = $domxpath->query($subjectXpathDataSearch);
       $queryResultCount = 0;
       if ($queryResults->length > 0) {
@@ -53,7 +52,7 @@ function preprocess_link_data(DOMDocument &$document) {
                 $objectPid = substr($objectPid, 0, $delimPos);
                 if (strlen($objectPid) > 0) {
                   $objectPidFound = 1;
-                  $dataMinusPid = substr($objectItem,0,strlen($objectItem)-(strlen($objectPid) + (2*$charsInDelim) + 1));
+                  $dataMinusPid = substr($objectItem, 0, strlen($objectItem) - (strlen($objectPid) + (2 * $charsInDelim) + 1));
                   $rdf_relationships[$rdfRelationshipCount]['rdf_link'][]['pid'] = $objectPid;
                   $rdf_relationships[$rdfRelationshipCount]['rdf_link'][$queryResultCount]['data'] = $dataMinusPid;
                   $queryResult->nodeValue = $dataMinusPid;
@@ -64,7 +63,6 @@ function preprocess_link_data(DOMDocument &$document) {
           if (!$objectPidFound) {
             $rdf_relationships[$rdfRelationshipCount]['rdf_link'][]['pid'] = 'nopid';
             $rdf_relationships[$rdfRelationshipCount]['rdf_link'][$queryResultCount]['data'] = $objectItem;
-
           }
           $queryResultCount+=1;
         }
@@ -73,25 +71,26 @@ function preprocess_link_data(DOMDocument &$document) {
     }
   }
   variable_set('rdf_relationships', $rdf_relationships);
-} 
+}
 
 /**
  * Processes the configuration info in the 'rdf_relationships' variable,
- * which relates to one or more RDF-autocomplete entries associated
- * with the XML-Form.
- * RDF-links and inverse-links are created between subject and object
+ * which relates to one or more RDF-autocomplete entries in the MySQL
+ * database that are associated with the XML-Form.
+ * RDF-links and inverse-links are created/removed from subject and object
  * where appropriate. The relevant datastreams in the objects are updated
  * with symmetrical entries, where appropriate.
  *
  * @param array $form
-     The data relating to the XML-form that has been submitted.
+ *   The data relating to the XML-form that has been submitted.
  * @param array $form_state
- * @param int $editFlag
+ *   Contains the PID of the object that possesses the datastream
+ *   that populated the XML-Form.
+ * @param boolean $editFlag
  *   Indicates whether processing the ingest of an object (FALSE)
  *   or the edit of an existing object (TRUE)
- *
  * @return
- *   The 'rdf_relationships' variable is re-initialized back to NULL.
+ *   None
  */
 function process_links(&$form, &$form_state, $editFlag) {
   module_load_include('inc', 'fedora_repository', 'api/tuque');
@@ -116,17 +115,38 @@ function process_links(&$form, &$form_state, $editFlag) {
 
     if ($subject) {
       // Get the dc.title value for the subject-object.
-      $subjectDCTitle = get_dc_title($subject);
+      // It would be preferable to call the generic
+      // function get_datastream_content_via_xpath()
+      // in the fba_utility module, but this would
+      // involve a second call to islandora_object_load
+      // which would be an unnecessary performance hit,
+      // so a local version of the function is used instead.
+      $subjectDCTitle = get_datastream_content_via_xpath_local($subject, 'DC', PURL_ELEMENTS_URI, '/oai_dc:dc/dc:title');
       $rdfRelationshipCount = 0;
 
-      // For Fidora processing, construct the user collection.
-      // This is irrelevant for non-Fidora processing.
+      // For dataset processing, construct the user collection.
+      // This is effectively ignored for non-dataset processing.
       $userId = $user->islandora_user_pid;
       if (strlen($userId) > 0) {
-        $userCollectionNs = str_replace(array('-',':'),'', $userId);
+        $userCollectionNs = str_replace(array('-', ':'), '', $userId);
         $userCollection = $userCollectionNs . ':collection';
       }
 
+      // Set up the batch array for ingest and update batch processing.
+      $progressMessage = 'Processed @current out of @total';
+      $batch = array(
+        'title' => t('Processing ...'),
+        'file' => drupal_get_path('module', 'islandora_content_model_forms') . '/ObjectLinker.inc',
+        'operations' => array(),
+        'finished' => 'completeObjectLinkerBatchProcessing',
+        'init_message' => t('Initializing... '),
+        'progress_message' => t($progressMessage),
+        'error_message' => t('An error was encountered while processing links.'),
+      );
+
+      // Process through the relationship-configuration entries
+      // associated with the xml-form and take the appropriate
+      // action.
       foreach ($rdf_relationships as $rdf_relationship) {
         list($rdfNamespace, $rdfName) = fba_rdfx_split_uri($rdf_relationship['rdf_predicate']);
         $rdfRelationshipCount += 1;
@@ -138,16 +158,18 @@ function process_links(&$form, &$form_state, $editFlag) {
             if (strlen($inverseName) == 0) {
               $inverseError = true;
             }
-          } else {
+          }
+          else {
             $inverseError = true;
           }
           if ($inverseError) {
             if ($editFlag) {
               $msgInsert = $postEditSubjectTitle;
-            } else {
+            }
+            else {
               $msgInsert = $subjectDCTitle;
             }
-            $msg = 'While creating or editing "' . $msgInsert . '" with ID "' . $subjectPid . '" and attempting to create an inverse of the "' . $rdfName . '" link, the inverse was not found.' ; 
+            $msg = 'While creating or editing "' . $msgInsert . '" with ID "' . $subjectPid . '" and attempting to create an inverse of the "' . $rdfName . '" link, the inverse was not found.';
             drupal_set_message(t($msg));
             break;
           }
@@ -155,7 +177,7 @@ function process_links(&$form, &$form_state, $editFlag) {
         if ($editFlag) {
           if ($rdfRelationshipCount == 1) {
             // Get the pre and post edit title values of
-            // the subject-object.
+            // the subject-object. Only needs to be done once.
             if (strlen($rdf_relationship['subject_xpath_title_search']) > 0) {
               $titleArray = get_pre_and_post_edit_subject_titles_from_form($form, $rdf_relationship['subject_xpath_title_search']);
               if (count($titleArray) == 2) {
@@ -171,12 +193,14 @@ function process_links(&$form, &$form_state, $editFlag) {
                     $replaceSubjectTitleInObjectDatastream = true;
                   }
                 }
-              } else {
-                $msg = 'While processing "' . $subjectDCTitle . '" with ID "' . $subjectPid . '" the path corresponding to the "Subject XPath Title Search" field in the autocomplete record for the "' . $rdfName . '" link was not found.'; 
+              }
+              else {
+                $msg = 'While processing "' . $subjectDCTitle . '" with ID "' . $subjectPid . '" the path corresponding to the "Subject XPath Title Search" field in the autocomplete record for the "' . $rdfName . '" link was not found.';
                 drupal_set_message(t($msg));
               }
-            } else {
-              $msg = 'While processing "' . $subjectDCTitle . '" with ID "' . $subjectPid . '" the "Subject Title XPath Search" field in the autocomplete recordfor the "' . $rdfName . '" link was found to be empty.'; 
+            }
+            else {
+              $msg = 'While processing "' . $subjectDCTitle . '" with ID "' . $subjectPid . '" the "Subject Title XPath Search" field in the autocomplete recordfor the "' . $rdfName . '" link was found to be empty.';
               drupal_set_message(t($msg));
             }
           }
@@ -186,7 +210,8 @@ function process_links(&$form, &$form_state, $editFlag) {
             $spoSubject = '<info:fedora/' . $subjectPid . '>';
             $spoPredicate = '<' . $rdf_relationship['rdf_predicate'] . '>';
             $spoObject = '*';
-          } else {
+          }
+          else {
             // It must be an inverse-only type of link.
             $spoSubject = '*';
             $spoPredicate = '<' . $inversePredicate . '>';
@@ -197,116 +222,87 @@ function process_links(&$form, &$form_state, $editFlag) {
         $rdfRelationshipRdfLinkCount = 0;
         $rdfRelationshipRdfLinkTot = count($rdf_relationship['rdf_link']);
         if ($rdfRelationshipRdfLinkTot > 0) {
-          process_instances_of_this_relationship($rdf_relationship, $editFlag, $userCollection, $preEditObjectTriplesForRelationship, $replaceSubjectTitleInObjectDatastream, $subjectPid, $subject, $subjectDCTitle, $preEditSubjectTitle, $postEditSubjectTitle, $rdfName, $inverseName, $rdfNamespace, $linkTypeOutwardOnly, $linkTypeOutwardAndInverse, $linkTypeInverseOnly);
+          process_instances_of_this_relationship($batch, $rdf_relationship, $editFlag, $userCollection, $preEditObjectTriplesForRelationship, $replaceSubjectTitleInObjectDatastream, $subjectPid, $subject, $subjectDCTitle, $preEditSubjectTitle, $postEditSubjectTitle, $rdfName, $inverseName, $rdfNamespace, $inversePredicate, $linkTypeOutwardOnly, $linkTypeOutwardAndInverse, $linkTypeInverseOnly);
         }
         if ($editFlag) {
           if ($preEditObjectTriplesForRelationship) {
             foreach ($preEditObjectTriplesForRelationship as $preEditObjectTripleForRelationship) {
-              if ($rdf_relationship['link_type'] == $linkTypeOutwardOnly || $rdf_relationship['link_type'] == $linkTypeOutwardAndInverse) {
-                $preEditPid = $preEditObjectTripleForRelationship['objectPid'];
-              } else {
-                $preEditPid = $preEditObjectTripleForRelationship['subjectPid'];
-              }
-              if (strlen($rdf_relationship['subject_xpath_data_search']) > 0) {
-                // Check whether entries relating to this link have been
-                // removed during the edit.
-                $preEditMatchFound = false;
-                if ($rdfRelationshipRdfLinkTot > 0) {
-                  foreach ($rdf_relationship['rdf_link'] as $postEditLink) {
-                    if (!strcmp($preEditPid,$postEditLink['pid'])) {
-                      $preEditMatchFound = true;
-                      break;
-                    }
-                  }
-                }
-                if (!$preEditMatchFound) {
-                  $preEditObject = islandora_object_load($preEditPid);
-                  if ($preEditObject) {
-                    if ($rdf_relationship['link_type'] != $linkTypeInverseOnly) {
-                      $subject->relationships->remove($rdfNamespace, $rdfName, $preEditObject);
-                    }
-                    if ($rdf_relationship['link_type'] == $linkTypeOutwardAndInverse || $rdf_relationship['link_type'] == $linkTypeInverseOnly) {
-                      $preEditObject->relationships->remove($rdfNamespace, $inverseName, $subject);
-                    }
-                    // Check if inverse-object-symmetric link processing
-                    // is required.
-                    if ($rdf_relationship['symmetry_in_object_datastream_required'] && strlen($rdf_relationship['object_xpath_data_search']) > 0) {
-                      remove_from_datastream($rdf_relationship, $preEditPid, $rdf_relationship['object_xpath_data_search'], $rdf_relationship['object_xpath_data_build_countback'], $preEditSubjectTitle);
-                    }
-                  } else {
-                    if ($rdf_relationship['link_type'] == $linkTypeOutwardAndInverse) {
-                      $msg = 'While processing the linking for "' . $preEditSubjectTitle . '" with ID "' . $subjectPid . '" and attempting to remove both a "' . $rdfName . '" link to and a "' . $inverseName . '" inverse link from "' . $preEditPid . '" the operation failed because the object "' . $preEditPid . '" was not found.' ;
-                      drupal_set_message(t($msg));
-                    } elseif ($rdf_relationship['link_type'] == $linkTypeInverseOnly) {
-                      $msg = 'While processing the linking for "' . $preEditSubjectTitle . '" with ID "' . $subjectPid . '" and attempting to remove a "' . $inverseName . '" inverse link from "' . $preEditPid . '" the operation failed because the object "' . $preEditPid . '" was not found.' ;
-                    } else {
-                      $msg = 'While processing the linking for "' . $preEditSubjectTitle . '" with ID "' . $subjectPid . '" and attempting to remove a "' . $rdfName . '" link to "' . $preEditPid . '" the operation failed because the object "' . $preEditPid . '" was not found.' ;
-                      drupal_set_message(t($msg));
-                    }
-                  }
-                }
-              } else {
-                if ($replaceSubjectTitleInObjectDatastream && $rdf_relationship['symmetry_in_object_datastream_required']) {
-                  // There is no subject xml field associated with this
-                  // link for this subject-object so the titles should
-                  // be replaced in ALL the linked objects.
-                  replace_text_in_datastream($rdf_relationship, $preEditPid, $rdf_relationship['object_xpath_data_search'], $preEditSubjectTitle, $postEditSubjectTitle);
-                }
-              }
+              $batch['operations'][] = array('process_edit_batch', array($rdf_relationship, $rdfRelationshipRdfLinkTot, $subjectPid, $rdfName, $rdfNamespace, $inverseName, $inversePredicate, $preEditObjectTripleForRelationship, $replaceSubjectTitleInObjectDatastream, $preEditSubjectTitle, $postEditSubjectTitle, $linkTypeOutwardOnly, $linkTypeOutwardAndInverse, $linkTypeInverseOnly));
             }
           }
         }
       }
-    } else {
+      batch_set($batch);
+      // The next three lines are only necessary in the dataset
+      // processing environment. They turn off the progress-bar
+      // display because otherwise the url redirect is caught
+      // by the dataset-processing and stops the functionality
+      // from working.
+      $batch = &batch_get();
+      $batch['progressive'] = FALSE;
+      batch_process();
+    }
+    else {
       $msg = 'While processing the linking for a record with ID "' . $subjectPid . '" the subject-object failed to load.';
       drupal_set_message(t($msg));
-    }   
+    }
   }
 }
 
 /**
  * Processes RDF-links and datastream modifications corresponding
- * to specific entries in the subject datastream.
+ * to specific entries in the subject-object datastream.
  *
- * @param array   $rdf_relationship
- * @param integer $editFlag
- * @param string  $userCollection,
- * @param array   $preEditObjectTriplesForRelationship,
- * @param integer $replaceSubjectTitleInObjectDatastream,
- * @param string  $subjectPid,
- * @param array   $subject,
- * @param string  $subjectDCTitle,
- * @param string  $preEditSubjectTitle,
- * @param string  $postEditSubjectTitle,
- * @param string  $rdfName,
- * @param string  $inverseName,
- * @param string  $rdfNamespace,
- * @param integer $linkTypeOutwardOnly,
- * @param integer $linkTypeOutwardAndInverse,
- * @param integer $linkTypeInverseOnly
- *
- * @return
+ * @param array $batch
+ *   The array that controls batch processing
+ * @param array $rdf_relationship
+ *   Corresponds to a single RDF-autocomplete associated with an XML-form.
+ * @param boolean $editFlag
+ *   Indicates whether the subject-object is being edited.
+ * @param string  $userCollection
+ *   The identifier for the user in dataset processing. Not
+ *   used for non-dataset processing.
+ * @param array   $preEditObjectTriplesForRelationship
+ *   The RDF links that were present previous to the user edit.
+ * @param boolean $replaceSubjectTitleInObjectDatastream
+ *   Flag to indicate that a change to the subject-object title
+ *   necessitates an update to that string where it appears
+ *   in an object-object datastream.
+ * @param string $subjectPid
+ *   The Persistent Identifier of the subject-object in the RDF
+ * @param array  $subject
+ *   The loaded subject-object
+ * @param string $subjectDCTitle
+ *   Contains the title of the subject for a newly ingested
+ *   subject-object
+ * @param string $preEditSubjectTitle
+ *   If the user has edited an existing subject-object this
+ *   contains the title of the subject-object prior
+ *   to the XML form having been edited by the user.
+ * @param string $postEditSubjectTitle
+ *   If the user has edited an existing subject-object this
+ *   contains the title of the subject object after
+ *   the XML form has been edited by the user.
+ * @param string $rdfName
+ *   The verb of the predicate component in the RDF
+ * @param string $inverseName
+ *   The verb of the predicate component in the inverse RDF
+ * @param string $rdfNamespace
+ *   The stem of the predicate component in the RDF
+ * @param string $inversePredicate
+ *   The inverse of the predicate associated with the subject-object
+ * @param int $linkTypeOutwardOnly
+ *   Constant for link type that is subject to object only
+ * @param int $linkTypeOutwardAndInverse
+ *   Constant for link type that is subject to object and object to subject
+ * @param int $linkTypeInverseOnly
+ *   Constant for link type that is object to subject only
+ * return
+ *   None
  */
-function process_instances_of_this_relationship(
-  &$rdf_relationship,
-  &$editFlag,
-  &$userCollection,
-  &$preEditObjectTriplesForRelationship,
-  &$replaceSubjectTitleInObjectDatastream,
-  &$subjectPid,
-  &$subject,
-  &$subjectDCTitle,
-  &$preEditSubjectTitle,
-  &$postEditSubjectTitle,
-  &$rdfName,
-  &$inverseName,
-  &$rdfNamespace,
-  &$linkTypeOutwardOnly,
-  &$linkTypeOutwardAndInverse,
-  &$linkTypeInverseOnly) {
+function process_instances_of_this_relationship(&$batch, &$rdf_relationship, &$editFlag, &$userCollection, &$preEditObjectTriplesForRelationship, &$replaceSubjectTitleInObjectDatastream, &$subjectPid, &$subject, &$subjectDCTitle, &$preEditSubjectTitle, &$postEditSubjectTitle, &$rdfName, &$inverseName, &$rdfNamespace, &$inversePredicate, &$linkTypeOutwardOnly, &$linkTypeOutwardAndInverse, &$linkTypeInverseOnly) {
 
   module_load_include('inc', 'fedora_repository', 'api/tuque');
-  module_load_include('inc', 'islandora_autocomplete_sparql', 'includes/islandora_autocomplete_sparql.vocab');
   module_load_include('inc', 'fedora_repository', 'ObjectHelper');
   module_load_include('inc', 'fedora_repository', 'api/fedora_item');
 
@@ -333,8 +329,9 @@ function process_instances_of_this_relationship(
         // constructed from the criteria specified in the relevant 
         // fields of the autocomplete record, e.g. the Object
         // Content Model and Collection Pids.
-        $sparqlTestObjectExistence = sprintf('SELECT ?title ?object WHERE { ?object <http://purl.org/dc/elements/1.1/title> ?title; <fedora-model:hasModel> <info:fedora/%s>; <fedora-rels-ext:isMemberOfCollection> <info:fedora/%s> FILTER (regex(str(?title), "^%s$", "i"))}', $rdf_relationship['object_content_model_pid'], $rdf_relationship['object_collection_pid'], escape_for_sparql($link['data']));
-      } else {
+        $sparqlTestObjectExistence = sprintf('SELECT ?title ?object WHERE { ?object <%stitle> ?title; <fedora-model:hasModel> <info:fedora/%s>; <fedora-rels-ext:isMemberOfCollection> <info:fedora/%s> FILTER (regex(str(?title), "^%s$", "i"))}', PURL_ELEMENTS_URI, $rdf_relationship['object_content_model_pid'], $rdf_relationship['object_collection_pid'], escape_for_sparql($link['data']));
+      }
+      else {
         // As object creation is not required, the sparql query
         // that is used for the auto-complete is used instead
         // as this allows for greater flexibility.
@@ -348,13 +345,14 @@ function process_instances_of_this_relationship(
         }
       }
 
-      // For Fidora processing, replace the user-collection-place-holder
+      // For dataset processing, replace the user-collection-place-holder
       // with the actual user collection.
       if (strlen($userCollection) > 0 && strpos($sparqlTestObjectExistence, $userCollectionPlaceHolder)) {
         $userCollectionFullPid = 'info:fedora/' . $userCollection;
         $sparqlTestObjectExistence = str_replace($userCollectionPlaceHolder, $userCollectionFullPid, $sparqlTestObjectExistence);
       }
-      $limit = -1; $offset = 0;
+      $limit = -1;
+      $offset = 0;
       $objectExistenceQueryResults = ObjectHelper::performRiQuery($sparqlTestObjectExistence, 'sparql', $limit, $offset);
       $objectExistenceCount = 0;
       foreach ($objectExistenceQueryResults as $objectExistenceQueryResult) {
@@ -366,43 +364,20 @@ function process_instances_of_this_relationship(
       if ($objectExistenceCount == 0) {
         if ($rdf_relationship['object_creation_required']) {
           $newObjectNamespacePrefix = $rdf_relationship['object_namespace_prefix'];
-
           $newObjectPid = fedora_item::get_next_PID_in_namespace($newObjectNamespacePrefix);
-          $newObjectDoc = new domDocument();
-
-          $newObjectDatastreamXml = $rdf_relationship['object_datastream_xml'];
-          // Add the title of the object to the new object datastream.
-          if ($rdf_relationship['object_xpath_title_search']) {
-            // The XML has been supplied in the sparql autocomplete form
-            // by the user so should contain the relevant XML title
-            // element. The "build" and "countback" arguments are
-            // therefore redundant.
-            add_to_datastream($subjectPid, $editFlag ? $postEditSubjectTitle : $subjectDCTitle, $rdf_relationship, $newObjectDatastreamXml, $rdf_relationship['object_xpath_title_search'], 'redundant', 'redundant', $link['data']);
-          }
-          if ($rdf_relationship['object_xpath_date_create_search']) {
-            // Add a solr-friendly-creation-date to the new object
-            // datastream.
-            $solrDate = sprintf("%sT%s.000Z", date("Y-m-d"),date("H:i:s"));
-            // The XML has been supplied in the sparql autocomplete form
-            // by the user so should contain the relevant XML creation
-            // date element. The "build" and "countback" arguments are
-            // therefore redundant.
-            add_to_datastream($subjectPid, $editFlag ? $postEditSubjectTitle : $subjectDCTitle, $rdf_relationship, $newObjectDatastreamXml, $rdf_relationship['object_xpath_date_create_search'], 'redundant', 'redundant', $solrDate);
-          }
-          $newObjectDoc->loadXML($newObjectDatastreamXml);
-          $foxml = new FOXML($link['data'], $newObjectPid, $rdf_relationship['object_dsid'], $rdf_relationship['object_content_model_pid'], $rdf_relationship['object_collection_pid'], 'isMemberOfCollection', null, $newObjectDoc, $rdf_relationship['object_transform'], $rdf_relationship['object_state']);
-          $foxml->ingest();
           $link['pid'] = $newObjectPid;
           $rdf_relationship['rdf_link'][$rdfRelationshipRdfLinkCount][pid] = $newObjectPid;
+          $batch['operations'][] = array('add_object_batch', array($newObjectPid, $rdf_relationship, $subjectPid, $link['data'], $editFlag, $postEditSubjectTitle, $subjectDCTitle, $link['data']));
         }
-      } else if ($objectExistenceCount == 1) {
+      }
+      else if ($objectExistenceCount == 1) {
         $link['pid'] = $objectExistencePid;
         $rdf_relationship['rdf_link'][$rdfRelationshipRdfLinkCount][pid] = $objectExistencePid;
 
         if ($editFlag && $rdf_relationship['symmetry_in_object_datastream_required'] && $replaceSubjectTitleInObjectDatastream) {
           // The editor has changed the title of the subject-object
-          // so this must be reflected in all the object-object
-          // datastreams that contain it.
+          // so this must be reflected in the object-object
+          // datastream that contains it.
           if ($preEditObjectTriplesForRelationship) {
             $preEditMatchFound = false;
             foreach ($preEditObjectTriplesForRelationship as $preEditObjectTripleForRelationship) {
@@ -411,84 +386,51 @@ function process_instances_of_this_relationship(
               }
             }
             if ($preEditMatchFound) {
-              replace_text_in_datastream($rdf_relationship, $objectExistencePid, $rdf_relationship['object_xpath_data_search'], $preEditSubjectTitle, $postEditSubjectTitle);
+              $batch['operations'][] = array('replace_text_in_datastream_batch', array($rdf_relationship, $objectExistencePid, $preEditSubjectTitle, $postEditSubjectTitle));
             }
           }
         }
-      } else {
+      }
+      else {
         if ($editFlag) {
           $msgInsert = $postEditSubjectTitle;
-        } else {
+        }
+        else {
           $msgInsert = $subjectDCTitle;
         }
-        $msg = 'While processing "' . $msgInsert . '" with ID "' . $subjectPid . '" and attempting to create a "' . $rdfName . '" link to "' . $link['data'] . '" more than one record was found with the same title, so the link was not created.' ;
+        $msg = 'While processing "' . $msgInsert . '" with ID "' . $subjectPid . '" and attempting to create a "' . $rdfName . '" link to "' . $link['data'] . '" more than one record was found with the same title, so the link was not created.';
         //drupal_set_message(t($msg));
       }
     }
     // If an object-pid exists create the appropriate RDF links.
     if (strcmp($link['pid'], 'nopid')) {
-      $objectPid = $link['pid'];
-      // Check whether the object exists.
-      $object = islandora_object_load($objectPid);
-      if ($object) {
-        // Even when creating a new subject-object, the user could have
-        // added identical entries in multiple fields, so check whether
-        // a link to this object already exists.
-
-        if ($rdf_relationship['link_type'] == $linkTypeOutwardOnly || $rdf_relationship['link_type'] == $linkTypeOutwardAndInverse) {
-          $spoSubject = '<info:fedora/' . $subjectPid . '>';
-          $spoPredicate = '<' . $rdf_relationship['rdf_predicate'] . '>';
-          $spoObject = '<info:fedora/' . $objectPid . '>';
-        } else {
-          // It must be an inverse-only type of link.
-          $spoSubject = '<info:fedora/' . $objectPid . '>';
-          $spoPredicate = '<' . $inversePredicate . '>';
-          $spoObject = '<info:fedora/' . $subjectPid . '>';
-        }
-        $existingObjectTriple = spo_search($spoSubject, $spoPredicate, $spoObject);
-        if (count($existingObjectTriple) == 0) {
-          // Add a subject-to-object RDF.
-          if ($rdf_relationship['link_type'] != $linkTypeInverseOnly) {
-            $subject->relationships->add($rdfNamespace, $rdfName, $objectPid);
-          }
-          if ($rdf_relationship['link_type'] == $linkTypeOutwardAndInverse || $rdf_relationship['link_type'] == $linkTypeInverseOnly) {
-            // Add an object-to-subject RDF.
-            $object->relationships->add($rdfNamespace, $inverseName, $subjectPid);
-            // Check if symmetric object datastream processing
-            // is required.
-            if ($rdf_relationship['symmetry_in_object_datastream_required'] && strlen($rdf_relationship['object_xpath_data_search']) > 0) {
-              $objectDatastreamID = $rdf_relationship['object_dsid'];
-              $objectDatastream = $object[$objectDatastreamID];
-              $objectDatastreamXml = $objectDatastream->content;
-              add_to_datastream($subjectPid, $editFlag ? $postEditSubjectTitle : $subjectDCTitle, $rdf_relationship, $objectDatastreamXml, $rdf_relationship['object_xpath_data_search'], $rdf_relationship['object_xpath_data_build'], $rdf_relationship['object_xpath_data_build_countback'], $editFlag ? $postEditSubjectTitle : $subjectDCTitle);
-              // Update the datastream with the xml containing the added node.
-              $objectDatastream->content = $objectDatastreamXml;
-            }
-          }
-        }
-      }
+      $batch['operations'][] = array('create_rdf_links_batch', array($rdf_relationship, $subjectPid, $link['pid'], $rdfName, $rdfNamespace, $inverseName, $inversePredicate, $editFlag, $subjectDCTitle, $postEditSubjectTitle, $linkTypeOutwardOnly, $linkTypeOutwardAndInverse, $linkTypeInverseOnly));
     }
     $rdfRelationshipRdfLinkCount += 1;
   }
 }
 
 /**
- * Retrieves the pre-edit title and post-edit
+ * Retrieve the pre-edit title and post-edit
  * title from the form array.
- * Serializing the entire form array and then
+ * Serializing the entire form-array and then
  * doing a string search for the relevant fields
  * is very ugly. Unfortunately there does not
  * seem to be any other way of obtaining this
- * data, because it is impossible to search a
+ * data because it is impossible to search a
  * multidimensional array with a string, even
  * if the string exactly mimics the equivalent
  * PHP statement that would access the desired
  * variables.
 
  * @param array $form
+     The array containing the XML-Form data.
  * @param string $subjectXpathTitleSearch
- *
- * @return array
+ *   The Xpath string that identifies the 
+ *   title of the subject-object
+ * @return
+ *   Array containing pre and post edit titles
+ *   or NULL
  */
 function get_pre_and_post_edit_subject_titles_from_form(&$form, $subjectXpathTitleSearch) {
   $title = array();
@@ -503,35 +445,36 @@ function get_pre_and_post_edit_subject_titles_from_form(&$form, $subjectXpathTit
   if ($xpathMatched) {
     $preEditTitleFieldLabelMatched = strstr($xpathMatched, $preEditTitleFieldLabel);
     if ($preEditTitleFieldLabelMatched) {
-      $afterPreEditFieldLabel = substr($preEditTitleFieldLabelMatched, (strlen($preEditTitleFieldLabel)+1));
+      $afterPreEditFieldLabel = substr($preEditTitleFieldLabelMatched, (strlen($preEditTitleFieldLabel) + 1));
       $startPreEditTitleFieldDelim = strstr($afterPreEditFieldLabel, $startFieldDelim);
       if ($startPreEditTitleFieldDelim) {
         $endPreEditTitleFieldDelimPos = strpos($startPreEditTitleFieldDelim, $endFieldDelim, 1);
         if ($endPreEditTitleFieldDelimPos > 0) {
-          $endPreEditTitleFieldPos = $endPreEditTitleFieldDelimPos - 1; 
+          $endPreEditTitleFieldPos = $endPreEditTitleFieldDelimPos - 1;
           $preEditTitle = substr($startPreEditTitleFieldDelim, 1, $endPreEditTitleFieldPos);
         }
         $postEditTitleFieldLabelMatched = strstr($startPreEditTitleFieldDelim, $postEditTitleFieldLabel);
         if ($postEditTitleFieldLabelMatched) {
-          $afterPostEditFieldLabel = substr($postEditTitleFieldLabelMatched, (strlen($postEditTitleFieldLabel)+1));
+          $afterPostEditFieldLabel = substr($postEditTitleFieldLabelMatched, (strlen($postEditTitleFieldLabel) + 1));
           $startPostEditTitleFieldDelim = strstr($afterPostEditFieldLabel, $startFieldDelim);
           if ($startPostEditTitleFieldDelim) {
             $endPostEditTitleFieldDelimPos = strpos($startPostEditTitleFieldDelim, $endFieldDelim, 1);
             if ($endPostEditTitleFieldDelimPos > 0) {
-              $endPostEditTitleFieldPos = $endPostEditTitleFieldDelimPos - 1; 
+              $endPostEditTitleFieldPos = $endPostEditTitleFieldDelimPos - 1;
               $postEditTitle = substr($startPostEditTitleFieldDelim, 1, $endPostEditTitleFieldPos);
             }
           }
         }
       }
     }
-  } 
+  }
 
   if (strlen($preEditTitle) > 0 && strlen($postEditTitle) > 0) {
     $title[] = $preEditTitle;
     $title[] = $postEditTitle;
     return $title;
-  } else {
+  }
+  else {
     return NULL;
   }
 }
@@ -540,9 +483,10 @@ function get_pre_and_post_edit_subject_titles_from_form(&$form, $subjectXpathTit
  * Escapes various characters that would otherwise
  * cause a SPARQL query to fail.
  *
- * @param string $inputStrip
- *
- * @return string
+ * @param string $inputString
+ *   The string in which the escaping is to be performed.
+ * return string $inputString
+ *   A string with the characters escaped.
  */
 function escape_for_sparql($inputString) {
   if (strlen($inputString) > 0) {
@@ -558,7 +502,8 @@ function escape_for_sparql($inputString) {
     $inputString = str_replace('"', '\\\"', $inputString);
     $inputString = str_replace("'", "\\\'", $inputString);
     return $inputString;
-  } else {
+  }
+  else {
     return '';
   }
 }
@@ -568,12 +513,16 @@ function escape_for_sparql($inputString) {
  * of object PIDS derived from the query results.
  *
  * @param string $subject
+ *   The subject component of the required spo query
  * @param string $predicate
+ *   The predicate component of the required spo query
  * @param string $object
- *
- * @return Array
+ *   The object component of the required spo query
+ * return
+ *   Array of triples returned by the spo query
+ *   or NULL
  */
-function spo_search($subject='*', $predicate='*', $object='*') {
+function spo_search($subject = '*', $predicate = '*', $object = '*') {
   module_load_include('inc', 'fedora_repository', 'api/fedora_utils');
   $query = $subject . ' ' . $predicate . ' ' . $object;
   $offset = 0;
@@ -582,7 +531,7 @@ function spo_search($subject='*', $predicate='*', $object='*') {
   $encodedquery = htmlentities(urlencode($query));
 
   $url = variable_get('fedora_repository_url', 'http://localhost:8080/fedora/risearch');
-    $url .= "?type=triples&flush=TRUE&format=N-Triples&limit=$limit&offset=$offset&lang=spo&stream=on&query=" . $encodedquery;
+  $url .= "?type=triples&flush=TRUE&format=N-Triples&limit=$limit&offset=$offset&lang=spo&stream=on&query=" . $encodedquery;
   $content = trim(do_curl($url));
 
   if ($content) {
@@ -594,15 +543,16 @@ function spo_search($subject='*', $predicate='*', $object='*') {
     $objectElement = 2;
     $processedTriples = array();
     for ($i = 0; $i < $tripleCount; $i++) {
-       $elements = explode("> ", $triples[$i]);
-       $namespacedSubjectPid = substr($elements[$subjectElement],strlen('<info:fedora/'));
-       $requiredPredicateElementLen = strlen($elements[$predicateElement])-1;
-       $predicateOfTriple = substr($elements[$predicateElement],1, $requiredPredicateElementLen);
-       $namespacedObjectPid = substr($elements[$objectElement],strlen('<info:fedora/'));
-       $processedTriples[] = array("subjectPid" => $namespacedSubjectPid, "predicate" =>  $predicateOfTriple, "objectPid" => $namespacedObjectPid);
+      $elements = explode("> ", $triples[$i]);
+      $namespacedSubjectPid = substr($elements[$subjectElement], strlen('<info:fedora/'));
+      $requiredPredicateElementLen = strlen($elements[$predicateElement]) - 1;
+      $predicateOfTriple = substr($elements[$predicateElement], 1, $requiredPredicateElementLen);
+      $namespacedObjectPid = substr($elements[$objectElement], strlen('<info:fedora/'));
+      $processedTriples[] = array("subjectPid" => $namespacedSubjectPid, "predicate" => $predicateOfTriple, "objectPid" => $namespacedObjectPid);
     }
     return $processedTriples;
-  } else {
+  }
+  else {
     return NULL;
   }
 }
@@ -625,11 +575,12 @@ function spo_search($subject='*', $predicate='*', $object='*') {
  *   be removed, when group-node removal is required.
  * @param string $elementContent
  *   The node element to be matched
- * @return
+ * return
+ *   None
  */
 function remove_from_datastream(&$rdf_relationship, $objectPid, $objectXpathSearch, $objectXpathBuildCountback, $elementContent) {
 
-  $objectDatastreamID=$rdf_relationship['object_dsid'];
+  $objectDatastreamID = $rdf_relationship['object_dsid'];
   $object = islandora_object_load($objectPid);
   $objectDatastream = $object[$objectDatastreamID];
   $objectDatastreamXml = $objectDatastream->content;
@@ -644,8 +595,9 @@ function remove_from_datastream(&$rdf_relationship, $objectPid, $objectXpathSear
       if (!strcmp($node->nodeValue, $elementContent)) {
         if ($removeNodeQueryResultsTot == 1) {
           $node->nodeValue = '';
-        } else {
-          for ($x=1; $x<=$objectXpathBuildCountback; $x++) {
+        }
+        else {
+          for ($x = 1; $x <= $objectXpathBuildCountback; $x++) {
             $childNode = $node;
             $parentNode = $childNode->parentNode;
             $node = $parentNode;
@@ -675,10 +627,13 @@ function remove_from_datastream(&$rdf_relationship, $objectPid, $objectXpathSear
  *   The node element value to be matched and replaced
  * @param string $replacementContent
  *   The node element value that replaces the matched value
- * @return
+ * return
+ *   None
  */
 function replace_text_in_datastream(&$rdf_relationship, $objectPid, $objectXpathSearch, $elementContent, $replacementContent) {
-  $objectDatastreamID=$rdf_relationship['object_dsid'];
+  module_load_include('inc', 'fedora_repository', 'api/tuque');
+
+  $objectDatastreamID = $rdf_relationship['object_dsid'];
   $object = islandora_object_load($objectPid);
   $objectDatastream = $object[$objectDatastreamID];
   $objectDatastreamXml = $objectDatastream->content;
@@ -725,9 +680,11 @@ function replace_text_in_datastream(&$rdf_relationship, $objectPid, $objectXpath
  *   be added, when group-node addition is required.
  * @param string $elementContent
  *   The node element content to be added.
- * @return
+ * return
+ *   true or false to indicate error
  */
-function add_to_datastream($subjectPid, $subjectTitle, &$rdf_relationship, &$objectDatastreamXml, $objectXpathSearch, $objectXpathBuild, $objectXpathCountback, $elementContent) {
+function add_to_datastream(&$rdf_relationship, &$objectDatastreamXml, $objectXpathSearch, $objectXpathBuild, $objectXpathCountback, $elementContent) {
+  $returnValue = true;
   $objectDoc = new domDocument();
   $objectDoc->loadXML($objectDatastreamXml);
   $objectXpath = new domXpath($objectDoc);
@@ -742,11 +699,12 @@ function add_to_datastream($subjectPid, $subjectTitle, &$rdf_relationship, &$obj
     foreach ($objectQueryResults as $objectQueryResult) {
       $objectItem = trim($objectQueryResult->textContent);
       // Check if the specific element content is present (case insensitive).
-      if (!strcasecmp($objectItem,$elementContent)) {
+      if (!strcasecmp($objectItem, $elementContent)) {
         $elementContentAlreadyPresent = true;
         break;
-      // Check if there is an empty element available.
-      } else if (strlen($objectItem) == 0) {
+        // Check if there is an empty element available.
+      }
+      else if (strlen($objectItem) == 0) {
         if (!$elementContentAddedToObjectDS) {
           $objectQueryResult->nodeValue = $elementContent;
           // Update the datastream with the xml containing the
@@ -760,45 +718,47 @@ function add_to_datastream($subjectPid, $subjectTitle, &$rdf_relationship, &$obj
   }
   if (!$elementContentAddedToObjectDS && !$elementContentAlreadyPresent) {
     // Add a new node containing the element content.
-    $objectXpathComponents = explode('/',$objectXpathBuild);
+    $objectXpathComponents = explode('/', $objectXpathBuild);
     $objectXpathComponentsTot = count($objectXpathComponents);
     $startObjectXpathComponent = $objectXpathComponentsTot - $objectXpathCountback;
-    $nodePref='node';
-    for ($objectXpathComponentCount=$objectXpathComponentsTot; $objectXpathComponentCount>$startObjectXpathComponent; $objectXpathComponentCount--) {
-      $elementDefinition = $objectXpathComponents[$objectXpathComponentCount-1];
+    $nodePref = 'node';
+    for ($objectXpathComponentCount = $objectXpathComponentsTot; $objectXpathComponentCount > $startObjectXpathComponent; $objectXpathComponentCount--) {
+      $elementDefinition = $objectXpathComponents[$objectXpathComponentCount - 1];
       $attributePhraseStart = strpos($elementDefinition, '[');
       $attributePhrase = strstr($elementDefinition, '[');
       if (strlen($attributePhraseStart) == 0) {
-        ${$nodePref.$objectXpathComponentCount} = $objectDoc->createElement($elementDefinition);
-      } else {
-        $elementName = substr($elementDefinition,0,$attributePhraseStart);
-        ${$nodePref.$objectXpathComponentCount} = $objectDoc->createElement($elementName);
+        ${$nodePref . $objectXpathComponentCount} = $objectDoc->createElement($elementDefinition);
+      }
+      else {
+        $elementName = substr($elementDefinition, 0, $attributePhraseStart);
+        ${$nodePref . $objectXpathComponentCount} = $objectDoc->createElement($elementName);
         $attributePhrase = substr($attributePhrase, 1);
         $delimPos = strpos($attributePhrase, ']');
         if ($delimPos !== false) {
           $attributePhrase = substr($attributePhrase, 0, $delimPos);
           if (strlen($attributePhrase) > 0) {
-            $attributeAndPresent = strpos($attributePhrase,' and ');
+            $attributeAndPresent = strpos($attributePhrase, ' and ');
             if ($attributeAndPresent > 0) {
               $attributes = explode(' and ', $attributePhrase);
-            } else {
+            }
+            else {
               $attributes = array();
               $attributes[0] = $attributePhrase;
             }
             $attributesTot = count($attributes);
             // Attach any attributes that are present to the
             // current node.
-            for ($x=0; $x<$attributesTot; $x++) {
+            for ($x = 0; $x < $attributesTot; $x++) {
               $attribute = explode('=', $attributes[$x]);
               $attribute[0] = trim($attribute[0]);
               if (strlen($attribute[0]) > 0) {
-                $attributeTerm = substr($attribute[0],1);
+                $attributeTerm = substr($attribute[0], 1);
                 $domAttribute = $objectDoc->createAttribute($attributeTerm);
                 if (strlen($attribute[1]) > 2) {
                   $attribute[1] = trim($attribute[1]);
-                  $attributeValue = substr($attribute[1],1, strlen($attribute[1])-2); // Strip off quotes.
+                  $attributeValue = substr($attribute[1], 1, strlen($attribute[1]) - 2); // Strip off quotes.
                   $domAttribute->value = $attributeValue;
-                  ${$nodePref.$objectXpathComponentCount}->appendChild($domAttribute);
+                  ${$nodePref . $objectXpathComponentCount}->appendChild($domAttribute);
                 }
               }
             }
@@ -806,19 +766,20 @@ function add_to_datastream($subjectPid, $subjectTitle, &$rdf_relationship, &$obj
         }
       }
       if ($objectXpathComponentCount == $objectXpathComponentsTot) {
-        $whatIsThis = $objectXpathComponents[$objectXpathComponentCount-1];
-        ${$nodePref.$objectXpathComponentCount}->appendChild($objectDoc->createTextNode($elementContent));
-      } else {
-        $prevObjectXpathComponentCount = $objectXpathComponentCount+1;//Incrementing by one here rather than within the appendChild function is necessary for the values to concatenate correctly for the variable-variable name.
-        ${$nodePref.$objectXpathComponentCount}->appendChild(${$nodePref.$prevObjectXpathComponentCount});
+        $whatIsThis = $objectXpathComponents[$objectXpathComponentCount - 1];
+        ${$nodePref . $objectXpathComponentCount}->appendChild($objectDoc->createTextNode($elementContent));
+      }
+      else {
+        $prevObjectXpathComponentCount = $objectXpathComponentCount + 1; //Incrementing by one here rather than within the appendChild function is necessary for the values to concatenate correctly for the variable-variable name.
+        ${$nodePref . $objectXpathComponentCount}->appendChild(${$nodePref . $prevObjectXpathComponentCount});
       }
     }
 
     $objectXpathStem = $objectXpathSearch;
-    for ($y=0; $y<$objectXpathCountback; $y++) {
+    for ($y = 0; $y < $objectXpathCountback; $y++) {
       $objectXpathStemPos = strrpos($objectXpathStem, '/');
       $objectXpathStem = substr($objectXpathStem, 0, $objectXpathStemPos);
-    } 
+    }
     $queryResults = $objectXpath->query($objectXpathStem);
     $queryResultsTot = $queryResults->length;
     // Loop through results in order to append node at the correct point.
@@ -828,30 +789,32 @@ function add_to_datastream($subjectPid, $subjectTitle, &$rdf_relationship, &$obj
       }
     }
     // Append the node.
-    $prevObjectXpathComponentCount = $objectXpathComponentCount+1;
+    $prevObjectXpathComponentCount = $objectXpathComponentCount + 1;
     if ($queryResultsTot > 0) {
-      $queryResult->appendChild(${$nodePref.$prevObjectXpathComponentCount});
-  
+      $queryResult->appendChild(${$nodePref . $prevObjectXpathComponentCount});
+
       // Update the datastream with the xml containing the added node.
       $objectDatastreamXml = $objectDoc->saveXML();
-    } else {
-      $msg = 'While creating or editing "' . $subjectTitle . '" with ID "' . $subjectPid . '" the attempt to add a node to a symmetric datastream in a linked object failed. Check the configuration of the autocomplete record' ;
-      drupal_set_message(t($msg));
-
+    }
+    else {
+      $returnValue = false;
     }
   }
+  return $returnValue;
 }
 
 /**
  *
  * Obtain the content-model-id of the object in order to
- * get the XML-Form so that it can be built to determine
+ * get the XML-Form and build the XML-Form to determine
  * whether there are any sparql-autocompletes attached.
+ * Remove any links corresponding to this object that are
+ * associated with other objects.
  *
- * @param string $subjectPID 
+ * @param string $pid 
  *   The PID of the object to be purged.
- *  
- * @return
+ * return
+ *   None
  */
 function process_links_on_purge($pid) {
   if (variable_get('rdf_relationships', NULL)) {
@@ -870,7 +833,27 @@ function process_links_on_purge($pid) {
       // variable.
       build_object_linker_form($object_linker_form_name);
       if (variable_get('rdf_relationships', NULL)) {
-        remove_links_on_purge($pid);
+        // Set up the batch array for link removal batch processing.
+        $progressMessage = 'Processed @current out of @total';
+        $batch = array(
+          'title' => t('Processing ...'),
+          'file' => drupal_get_path('module', 'islandora_content_model_forms') . '/ObjectLinker.inc',
+          'operations' => array(),
+          'finished' => 'completeObjectLinkerBatchProcessing',
+          'init_message' => t('Initializing... '),
+          'progress_message' => t($progressMessage),
+          'error_message' => t('An error was encountered while removing links.'),
+        );
+        remove_links_on_purge($batch, $pid);
+        batch_set($batch);
+        // The next three lines are only necessary in the dataset
+        // processing environment. They turn off the progress-bar
+        // display because otherwise the url redirect is caught
+        // by the dataset-processing and stops the functionality
+        // from working.
+        $batch = &batch_get();
+        $batch['progressive'] = FALSE;
+        batch_process();
         variable_set('rdf_relationships', NULL);
       }
     }
@@ -882,14 +865,17 @@ function process_links_on_purge($pid) {
  * Remove any inverse RDF-links and symmetric entries in the
  * datastreams of linked objects.
  *
+ * @param array $batch 
+ *   The array that controls the batch processing for link removal
  * @param string $subjectPID 
- *   The PID of the object to be purged.
- *  
- * @return
+ *   The PID of the object that is being purged.
+ * return
+ *   None
  */
-function remove_links_on_purge($subjectPid) {
+function remove_links_on_purge(&$batch, $subjectPid) {
   module_load_include('inc', 'fedora_repository', 'api/tuque');
   module_load_include('inc', 'islandora_autocomplete_sparql', 'includes/islandora_autocomplete_sparql.vocab');
+  $aggregateTriplesTot = 0;
   $linkTypeOutwardOnly = 0;
   $linkTypeOutwardAndInverse = 1;
   $linkTypeInverseOnly = 2;
@@ -902,55 +888,39 @@ function remove_links_on_purge($subjectPid) {
     //Get the dc.title value for the subject incase it is required
     //for removing inverse symmetric data in the object datastreams.
 
-    $subjectDCTitle = get_dc_title($subject);
+    $subjectDCTitle = get_datastream_content_via_xpath_local($subject, 'DC', PURL_ELEMENTS_URI, '/oai_dc:dc/dc:title');
     foreach ($rdf_relationships as $rdf_relationship) {
-      // The outward rdf links do not strictly need to be
-      // removed as they will be deleted from the triple-store
+      // The outward rdf links do not need to be removed
+      // because they will be deleted from the triple-store 
       // as part of the standard fedora processing on purge.
-      // However, as the object-datastream updates have to
-      // be done and the inverse links have to be removed
-      // they might as well be tidied up as we go along.
       if ($rdf_relationship['link_type'] == $linkTypeOutwardOnly || $rdf_relationship['link_type'] == $linkTypeOutwardAndInverse) {
-        // Store all the RDF-info relating to the
-        // subject object for the current relationship
-        // in an array so that the links and inverse links
-        // and any appropriate datastream content in the
-        // linked-to object can be removed.
+        // Store all the RDF-info relating to the outward
+        // links for the current relationship in an array
+        // so that the inverse links and any symmetric
+        // datastream content in the linked-to object can
+        // be removed.
         $spoSubject = '<info:fedora/' . $subjectPid . '>';
         $spoPredicate = '<' . $rdf_relationship['rdf_predicate'] . '>';
         $spoObject = '*';
         $objectTriplesForRelationship = spo_search($spoSubject, $spoPredicate, $spoObject);
         $objectTriplesForRelationshipTot = count($objectTriplesForRelationship);
+        $aggregateTriplesTot += $objectTriplesForRelationshipTot;
         if ($objectTriplesForRelationshipTot > 0) {
           if ($rdf_relationship['link_type'] == $linkTypeOutwardAndInverse) {
             $inverseName = fba_textfield_inverseof_value($rdf_relationship['rdf_predicate']);
+            if (!strcmp($inverseName, 'No inverse')) {
+              $msg = 'While purging "' . $subjectDCTitle . '" with ID "' . $subjectPid . '" and attempting to remove the inverse link for "' . $rdfName . '" on the object "' . $objectPid . '", the inverse linkname was not found in the ontology.';
+              drupal_set_message(t($msg));
+            }
           }
           list($rdfNamespace, $rdfName) = fba_rdfx_split_uri($rdf_relationship['rdf_predicate']);
           foreach ($objectTriplesForRelationship as $objectTripleForRelationship) {
             $objectPid = $objectTripleForRelationship['objectPid'];
-            $object = islandora_object_load($objectPid);
-            if ($object) {
-              if ($rdf_relationship['link_type'] == $linkTypeOutwardAndInverse) {
-                if (!strcmp($inverseName, 'No inverse')) {
-                  $msg = 'While purging "' . $subjectDCTitle . '" with ID "' . $subjectPid . '" and attempting to remove the inverse link for "' . $rdfName . '" on the object "' . $objectPid . '", the inverse linkname was not found in the ontology.' ; 
-                  drupal_set_message(t($msg));
-                } else {
-                  $object->relationships->remove($rdfNamespace, $inverseName, $subject);
-                }
-              }
-
-              // Check if inverse-object-symmetric datastream processing
-              // is required.
-              if ($rdf_relationship['symmetry_in_object_datastream_required'] && strlen($rdf_relationship['object_xpath_data_search']) > 0) {
-                remove_from_datastream($rdf_relationship, $objectPid, $rdf_relationship['object_xpath_data_search'], $rdf_relationship['object_xpath_data_build_countback'], $subjectDCTitle);
-              }
-            } else {
-              $msg = 'While purging "' . $subjectDCTitle . '" with ID "' . $subjectPid . '" and attempting to process the linkage for "' . $objectPid . '", the object for this ID was not found.' ; 
-              drupal_set_message(t($msg));
-            }
+            $batch['operations'][] = array('remove_inverse_rdf_batch', array($subjectPid, $objectPid, $rdf_relationship, $rdfNamespace, $inverseName, $subjectDCTitle));
           }
         }
-      } else {
+      }
+      else {
         // This must be an inverse-only type of link.
         $inversePredicate = fba_textfield_inverseof_predicate($rdf_relationship['rdf_predicate']);
         $inverseError = false;
@@ -959,12 +929,13 @@ function remove_links_on_purge($subjectPid) {
           if (strlen($inverseName) == 0) {
             $inverseError = true;
           }
-        } else {
+        }
+        else {
           $inverseError = true;
         }
         if ($inverseError) {
           $msgInsert = $subjectDCTitle;
-          $msg = 'While creating or editing "' . $msgInsert . '" with ID "' . $subjectPid . '" and attempting to create an inverse of the "' . $rdfName . '" link, the inverse was not found.' ; 
+          $msg = 'While creating or editing "' . $msgInsert . '" with ID "' . $subjectPid . '" and attempting to create an inverse of the "' . $rdfName . '" link, the inverse was not found.';
           drupal_set_message(t($msg));
           break;
         }
@@ -974,50 +945,44 @@ function remove_links_on_purge($subjectPid) {
         $spoObject = '<info:fedora/' . $subjectPid . '>';
         $objectTriplesForRelationship = spo_search($spoSubject, $spoPredicate, $spoObject);
         $objectTriplesForRelationshipTot = count($objectTriplesForRelationship);
+        $aggregateTriplesTot += $objectTriplesForRelationshipTot;
         if ($objectTriplesForRelationshipTot > 0) {
           foreach ($objectTriplesForRelationship as $objectTripleForRelationship) {
             $objectPid = $objectTripleForRelationship['subjectPid'];
-            $object = islandora_object_load($objectPid);
-            if ($object) {
-              $object->relationships->remove($inverseNamespace, $inverseName, $subject);
-              // Check if inverse-object-symmetric datastream processing
-              // is required.
-              if ($rdf_relationship['symmetry_in_object_datastream_required'] && strlen($rdf_relationship['object_xpath_data_search']) > 0) {
-                remove_from_datastream($rdf_relationship, $objectPid, $rdf_relationship['object_xpath_data_search'], $rdf_relationship['object_xpath_data_build_countback'], $subjectDCTitle);
-              }
-            } else {
-              $msg = 'While purging "' . $subjectDCTitle . '" with ID "' . $subjectPid . '" and attempting to remove the inverse link "' . $inverseName . '" on the object "' . $objectPid . '", the object for this ID was not found.' ; 
-              drupal_set_message(t($msg));
-            }
+            $batch['operations'][] = array('remove_inverse_rdf_batch', array($subjectPid, $objectPid, $rdf_relationship, $inverseNamespace, $inverseName, $subjectDCTitle));
           }
         }
       }
     }
-    // The processing above should cover all eventualities, however it  
-    // is possible that inverse links remain if, for example, the
+    // The processing above should cover normal eventualities, however
+    // it is possible that inverse links would remain if, for example,
     // the sparql autocomplete records were modified after objects with
     // related links had been created. The systems administrator should 
-    // not have let this situation arise, but we might as well remove
-    // them if they exist. Note that what is referred to as a "subject"
-    // within the spo_search and triple, is different from the main
-    // "subject" of this purge, because the main "subject" is used as
-    // the "object" within the spo_search.
+    // not have let this situation arise, but we should remove them if
+    // they exist. As the links will still exist until the batch
+    // operations are executed a check is made to establish whether
+    // more links exist than have already been accounted for and the
+    // extra batch operation below is only called if there are more.
+    // Note that what is referred to as a "subject" within the
+    // spo_search and triple, is different from the main "subject" of
+    // this purge, because the main "subject" is used as the "object"
+    // within the spo_search.
+    // The first instance of $rdf_relationships[0] is passed to the
+    // function because a parameter and this is as good an arbitrary
+    // choice as any because this processing is a catch-all independent
+    // of the content of the $rdf_relationships array. If it happens
+    // to result in a datastream entry being removed then that is a
+    // bonus.
     $spoSubject = '*';
     $spoPredicate = '*';
     $spoObject = '<info:fedora/' . $subjectPid . '>';
     $triples = spo_search($spoSubject, $spoPredicate, $spoObject);
     $triplesTot = count($triples);
-    if ($triplesTot > 0) {
+    if ($triplesTot > 0 && $triplesTot > $aggregateTriplesTot) {
       foreach ($triples as $triple) {
         list($rdfNamespace, $rdfName) = fba_rdfx_split_uri($triple['predicate']);
-        $pid = $triple['subjectPid'];
-        $object = islandora_object_load($pid);
-        if ($object) {
-          $object->relationships->remove($rdfNamespace, $rdfName, $subject);
-        } else {
-          $msg = 'While purging "' . $subjectDCTitle . '" with ID "' . $subjectPid . '" and attempting to remove the inverse link "' . $rdfName . '" on the object "' . $pid . '", the object for this ID was not found.' ; 
-          drupal_set_message(t($msg));
-        }
+        $objectPid = $triple['subjectPid'];
+        $batch['operations'][] = array('remove_inverse_rdf_batch', array($subjectPid, $objectPid, $rdf_relationships[0], $rdfNamespace, $rdfName, $subjectDCTitle));
       }
     }
   }
@@ -1025,36 +990,46 @@ function remove_links_on_purge($subjectPid) {
 
 /**
  *
- * Get the contents of the Dublin Core title element
- * from the object passed in as a parameter.
+ * Get the contents from the datastream specified by the arguments
+ * for the object passed in as a parameter. This is a local function
+ * that is similar to the get_datastream_content_via_xpath function
+ * in GenericFunctions.inc in the fba_utiity module. A modified
+ * local version is present here for performance reasons as it takes
+ * a parameter of an object that has already been loaded.
  *
  * @param array $object
- *   The object from which the dc title is to be obtained.
- *  
- * @return string
- *   The Dublin Core title or an empty string
+ *   The object from which the content specified by the xpath
+ *   query is to be obtained.
+ * @param string $datastremLabel
+ *   The label of the datastream that is to be queried
+ * @param string $namespace
+ *   The namespace to be registered for the xpath query
+ * @param string $xpathQuery
+ *   The xpath query to identify the required content
+ * return string
+ *   The required content or NULL
  */
+function get_datastream_content_via_xpath_local(&$object, $datastreamLabel, $namespace, $xpathQuery) {
+  $datastream = $object[$datastreamLabel];
+  $xml = $datastream->content;
+  $doc = new domDocument();
+  $doc->loadXML($xml);
+  $xpath = new domXpath($doc);
+  $xpath->registerNamespace(strtolower($datastreamLabel), $xpathQuery);
+  $xpathQueryResults = $xpath->query($xpathQuery);
 
-function get_dc_title(&$object) {
-  $DCDatastream = $object['DC'];
-  $DCXml = $DCDatastream->content;
-  $DCDoc = new domDocument();
-  $DCDoc->loadXML($DCXml);
-  $DCXpath = new domXpath($DCDoc);
-  $DCXpath->registerNamespace('dc', 'http://purl.org/dc/elements/1.1/');
-  $DCXpathQueryResults = $DCXpath->query('/oai_dc:dc/dc:title');
-
-  $DCXpathQueryResultCount = 0;
-  if ($DCXpathQueryResults->length > 0) {
-    foreach ($DCXpathQueryResults as $DCXpathQueryResult) {
-      $DCTitle = $DCXpathQueryResult->textContent;
-      $DCXpathQueryResultCount += 1;
+  $xpathQueryResultCount = 0;
+  if ($xpathQueryResults->length > 0) {
+    foreach ($xpathQueryResults as $xpathQueryResult) {
+      $target = $xpathQueryResult->textContent;
+      $xpathQueryResultCount += 1;
     }
   }
 
-  if (count($DCXpathQueryResultCount > 0)) {
-    return $DCTitle;
-  } else {
+  if ($xpathQueryResultCount == 1) {
+    return $target;
+  }
+  else {
     return '';
   }
 }
@@ -1070,8 +1045,7 @@ function get_dc_title(&$object) {
  * @param string $pid
  *   The PID of the object for which the content
  *   model is to be found.
- *  
- * @return string
+ * return string
  *   The PID of the content model or an empty string.
  */
 function get_object_linker_content_model($pid) {
@@ -1095,11 +1069,12 @@ function get_object_linker_content_model($pid) {
   }
   if ($contentModelsTot == 1) {
     return $objectLinkerContentModel;
-  } else {
-     $msg = $pid . ', has ' . $contentModelsTot . ' content models attached so the form name could not be determined and so any links created by the Object Linker cannot be processed.';
-     drupal_set_message(t($msg), 'error');
-     return '';
-   }
+  }
+  else {
+    $msg = $pid . ', has ' . $contentModelsTot . ' content models attached so the form name could not be determined and so any links created by the Object Linker cannot be processed.';
+    drupal_set_message(t($msg), 'error');
+    return '';
+  }
 }
 
 /**
@@ -1115,8 +1090,7 @@ function get_object_linker_content_model($pid) {
  *   the content model is to be found.
  * @param string $contentModelPid
  *   The PID of the content model associated with form name.
- *  
- * @return string
+ * return string
  *   The XML-form name or an empty string.
  */
 function get_object_linker_form_name($objectPid, $contentModelPid) {
@@ -1135,7 +1109,8 @@ function get_object_linker_form_name($objectPid, $contentModelPid) {
     $objectLinkerFormName = '';
     $msg = $objectPid . ' has no form associated with the content model ' . $contentModelPid . ', therefore any links that were created by the Object Linker could not be processed.';
     drupal_set_message(t($msg), 'error');
-  } else if ($formNameTot > 1) {
+  }
+  else if ($formNameTot > 1) {
     $objectLinkerFormName = '';
     $msg = $objectPid . ', has more than one form associated with the content model ' . $contentModelPid . ', therefore any links that were created by the Object Linker could not be processed.';
     drupal_set_message(t($msg), 'error');
@@ -1154,7 +1129,8 @@ function get_object_linker_form_name($objectPid, $contentModelPid) {
  * @param string $formName
  *   The XML-form name to be built.
  *  
- * @return
+ * return
+ *   None
  */
 function build_object_linker_form($formName) {
   module_load_include('inc', 'xml_form_builder', 'XMLFormDatabase');
@@ -1176,7 +1152,8 @@ function build_object_linker_form($formName) {
       unset($object_linker_form);
       unset($formState);
     }
-  } catch (Exception $e) {
+  }
+  catch (Exception $e) {
     $msg = "File: {$e->getFile()}<br/>Line: {$e->getLine()}<br/>Error: {$e->getMessage()}";
     drupal_set_message(filter_xss(t($msg)), 'error');
   }
@@ -1204,10 +1181,10 @@ function build_object_linker_form($formName) {
  *   is a match it is not re-registered. If there is no
  *   match, it is registered and the namespace prefix is
  *   added to the array.
- *  
- * @return
+ * return
+ *   None
  */
-function register_xpath_namespaces(&$domxpath,&$namespaceInfo,$checkPrevious=false,&$namespacePrefixesRegistered=NULL) {
+function register_xpath_namespaces(&$domxpath, &$namespaceInfo, $checkPrevious = false, &$namespacePrefixesRegistered = NULL) {
   $namespaceDelimiter = '==';
   $namespaceComponentDelimiter = '!!';
   $namespaces = explode($namespaceDelimiter, $namespaceInfo);
@@ -1228,12 +1205,14 @@ function register_xpath_namespaces(&$domxpath,&$namespaceInfo,$checkPrevious=fal
         }
         if (!$alreadyRegistered) {
           $domxpath->registerNamespace($namespaceComponents[0], $namespaceComponents[1]);
-          $namespacePrefixesRegistered[]=$namespaceComponents[0];
+          $namespacePrefixesRegistered[] = $namespaceComponents[0];
         }
-      } else {
+      }
+      else {
         $domxpath->registerNamespace($namespaceComponents[0], $namespaceComponents[1]);
       }
-    } else {
+    }
+    else {
       drupal_set_message(t('The name space information has been incorrectly delimited for object linking.'));
     }
     $namespaceCount += 1;
@@ -1243,7 +1222,6 @@ function register_xpath_namespaces(&$domxpath,&$namespaceInfo,$checkPrevious=fal
     drupal_set_message(t('The required name space information has not been entered for object linking.'));
   }
 }
-
 
 /**
  *
@@ -1257,8 +1235,7 @@ function register_xpath_namespaces(&$domxpath,&$namespaceInfo,$checkPrevious=fal
  *   The sparql query used to populate the list
  * @param string $clickable
  *   Determines whether the values are clickable
- *  
- * @return
+ * return
  *   Formatted list or empty string
  */
 function get_link_list($header, $sparqlQuery, $clickable = true) {
@@ -1287,19 +1264,20 @@ EOQ;
     }
     $formattedHtml .= '</ul></p></div>';
     return $formattedHtml;
-  } else {
+  }
+  else {
     return '';
   }
 }
+
 /**
  *
  * Perform sparql query and return resulting array.
  *
  * @param string $sparqlQuery
  *   The sparql query
- *  
  * @return array
- *   Query results
+ *   Query results or NULL
  *   
  */
 function get_link_array($sparqlQuery) {
@@ -1308,11 +1286,13 @@ function get_link_array($sparqlQuery) {
   $sparql_field = <<<EOQ
 $sparqlQuery
 EOQ;
-  $limit = -1; $offset = 0;
+  $limit = -1;
+  $offset = 0;
   $queryResults = ObjectHelper::performRiQuery($sparqlQuery, 'sparql', $limit, $offset);
   if (count($queryResults) > 0) {
-      return $queryResults;
-  } else {
+    return $queryResults;
+  }
+  else {
     return NULL;
   }
 }
@@ -1331,21 +1311,17 @@ EOQ;
  *
  * @param string $subjectPid
  *   The subject PID for the spo search
- *  
  * @param string $predicate
  *   The predicate for the spo search
- *  
  * @param integer $limit
  *   A limit for the sparql query
- *  
  * @param integer $returnType
  *   Determines whether an array or html-bounded list is returned
- *  
  * @param string $header
  *   If html-bounded list type is stipulated then this is the header
  *   for the list.
  *  
- * @return array
+ * return array
  *   Query results
  *   
  */
@@ -1365,24 +1341,28 @@ function get_rdf_object_entries($subjectPid, $predicate, $limit, $returnType, $h
     foreach ($spoResults as $spoResult) {
       $spoResultsCount += 1;
       if ($spoResultsCount < $spoResultsTot) {
-        $filterComponent .= 'sameTerm(?subject, <info:fedora/' .$spoResult['objectPid'] . '>)' . ' || ';
-      } else {
-        $filterComponent .= 'sameTerm(?subject, <info:fedora/' .$spoResult['objectPid'] . '>)' . '))';
+        $filterComponent .= 'sameTerm(?subject, <info:fedora/' . $spoResult['objectPid'] . '>)' . ' || ';
+      }
+      else {
+        $filterComponent .= 'sameTerm(?subject, <info:fedora/' . $spoResult['objectPid'] . '>)' . '))';
       }
     }
-    $sparqlQuery = 'SELECT ?title ?pid WHERE { ?subject <http://purl.org/dc/elements/1.1/identifier> ?pid; <http://purl.org/dc/elements/1.1/title> ?title ' . $filterComponent . ' } ORDER BY ?title';
+    $sparqlQuery = 'SELECT ?title ?pid WHERE { ?subject <' . PURL_ELEMENTS_URI . 'identifier> ?pid; <' . PURL_ELEMENTS_URI . 'title> ?title ' . $filterComponent . ' } ORDER BY ?title';
 
     if ($limit > $noLimit) {
       $sparqlQuery = $sparqlQuery . ' LIMIT ' . $limit;
     }
     if ($returnType == $arrayType) {
       return get_link_array($sparqlQuery);
-    } else if ($returnType == $clickableListType) {
+    }
+    else if ($returnType == $clickableListType) {
       return get_link_list($header, $sparqlQuery, true);
-    } else {
+    }
+    else {
       return get_link_list($header, $sparqlQuery, false);
     }
-  } else {
+  }
+  else {
     return NULL;
   }
 }
@@ -1395,21 +1375,16 @@ function get_rdf_object_entries($subjectPid, $predicate, $limit, $returnType, $h
  *
  * @param string $predicate
  *   The predicate for the sparql query
- *  
  * @param string $objectPid
  *   The object PID for the sparql query
- *  
  * @param integer $limit
  *   A limit for the sparql query
- *  
  * @param integer $returnType
  *   Determines whether an array or html-bounded list is returned
- *  
  * @param string $header
  *   If html-bounded list type is stipulated then this is the header
  *   for the list.
- *  
- * @return array
+ * return array
  *   Query results
  *   
  */
@@ -1420,15 +1395,17 @@ function get_rdf_subject_entries($objectPid, $predicate, $limit, $returnType, $h
   $noLimit = -1;
   $object = '<info:fedora/' . $objectPid . '>';
   $filterComponent = 'FILTER (sameTerm(?object,' . $object . '))';
-  $sparqlQuery = 'SELECT ?title ?pid WHERE { ?subject ' . $predicate . ' ?object;  <http://purl.org/dc/elements/1.1/title> ?title; <http://purl.org/dc/elements/1.1/identifier> ?pid ' . $filterComponent . ' } ORDER BY ?title';
+  $sparqlQuery = 'SELECT ?title ?pid WHERE { ?subject ' . $predicate . ' ?object;  <' . PURL_ELEMENTS_URI . 'title> ?title; <' . PURL_ELEMENTS_URI . 'identifier> ?pid ' . $filterComponent . ' } ORDER BY ?title';
   if ($limit > $noLimit) {
     $sparqlQuery = $sparqlQuery . ' LIMIT ' . $limit;
   }
   if ($returnType == $arrayType) {
     return get_link_array($sparqlQuery);
-  } else if ($returnType == $clickableListType) {
+  }
+  else if ($returnType == $clickableListType) {
     return get_link_list($header, $sparqlQuery, true);
-  } else {
+  }
+  else {
     return get_link_list($header, $sparqlQuery, false);
   }
 }
@@ -1441,12 +1418,10 @@ function get_rdf_subject_entries($objectPid, $predicate, $limit, $returnType, $h
  *
  * @param string $label
  *   The label field from the object
- *  
  * @param string $sparqlQuery
  *   The sparql query to be used to check for a duplicate. It
  *   should select only 'title'.
- * 
- * @return string
+ * return string
  *   Either NULL when no duplicate is found, or an error message
  *   when a duplicate is found.
  *   
@@ -1455,15 +1430,388 @@ function check_for_duplicate_label($label, $sparqlQuery) {
   $linkArray = get_link_array($sparqlQuery);
   if (count($linkArray) > 0) {
     foreach ($linkArray as $linkItem) {
-       $existingTitle = $linkItem['title'];
-       break;
+      $existingTitle = $linkItem['title'];
+      break;
     }
     if (strcmp($label, $existingTitle)) {
       return 'The entry "' . $label . '" is already present within this collection as "' . $existingTitle . '", so it has not been created.';
-    } else {
+    }
+    else {
       return 'The entry "' . $label . '" is already present within this collection, so it has not been created.';
     }
-  } else {
+  }
+  else {
     return NULL;
   }
+}
+
+/**
+ *
+ * Add a new object with the appropriate XML and RDF links
+ * as a batch operation.
+ * Note that $rdf_relationship and $link are not passed by
+ * reference in this instance because the original arrays
+ * might no longer exist by the time this batch operation
+ * is called.
+ *
+ * @param string $newObjectPid
+ *   The Persistent Identifier for the new object
+ * @param array $rdf_relationship
+ *   Corresponds to a single RDF-autocomplete associated with an XML-form.
+ * @param string $subjectPid
+ *   The Persistent Identifier for the subject object
+ * @param string $data
+ *   The character string entered by the user
+ * @param boolean $editFlag
+ *   Indicates whether the subject object is being edited.
+ * @param boolean $postEditSubjectTitle
+ *   Contains the title of the subject object after
+ *   the XML form has been edited by the user.
+ * @param string $subjectDCTitle
+ *   Contains the title of the subject object prior 
+ *   to the XML form being edited by the user.
+ * @param string $data
+ *   Contains the content of the relevant XML element
+ *   of the XML form after it has been edited.
+ * @param string $context
+ *   Required for batch processing
+ * return
+ *   None
+ */
+
+function add_object_batch($newObjectPid, $rdf_relationship, $subjectPid, $data, $editFlag, $postEditSubjectTitle, $subjectDCTitle, $data, &$context) {
+  module_load_include('inc', 'fedora_repository', 'api/tuque');
+  module_load_include('inc', 'fedora_repository', 'ObjectHelper');
+  module_load_include('inc', 'fedora_repository', 'api/fedora_item');
+  module_load_include('inc', 'islandora_content_model_forms', 'FOXML');
+
+  $newObjectDoc = new domDocument();
+
+  $newObjectDatastreamXml = $rdf_relationship['object_datastream_xml'];
+  // Add the title of the object to the new object datastream.
+  if ($rdf_relationship['object_xpath_title_search']) {
+    // The XML has been supplied in the sparql autocomplete form
+    // by the user so should contain the relevant XML title
+    // element. The "build" and "countback" arguments are therefore
+    // redundant because they are only needed when the XML
+    // field is not found and it has to be created.
+    if (!(add_to_datastream($rdf_relationship, $newObjectDatastreamXml, $rdf_relationship['object_xpath_title_search'], 'redundant', 'redundant', $data))) {
+      $context['results']['errorFlag'] = 1;
+      $context['results']['currentPid'] = $newObjectPid;
+    }
+  }
+  if ($rdf_relationship['object_xpath_date_create_search']) {
+    // Add a solr-friendly-creation-date to the new object
+    // datastream.
+    $solrDate = sprintf("%sT%s.000Z", date("Y-m-d"), date("H:i:s"));
+    // The XML has been supplied in the sparql autocomplete form
+    // by the user so should contain the relevant XML creation
+    // date element. The "build" and "countback" arguments are
+    // therefore redundant.
+    if (!(add_to_datastream($rdf_relationship, $newObjectDatastreamXml, $rdf_relationship['object_xpath_date_create_search'], 'redundant', 'redundant', $solrDate))) {
+      $context['results']['errorFlag'] = 1;
+      $context['results']['currentPid'] = $newObjectPid;
+    }
+  }
+  $newObjectDoc->loadXML($newObjectDatastreamXml);
+  $foxml = new FOXML($data, $newObjectPid, $rdf_relationship['object_dsid'], $rdf_relationship['object_content_model_pid'], $rdf_relationship['object_collection_pid'], 'isMemberOfCollection', null, $newObjectDoc, $rdf_relationship['object_transform'], $rdf_relationship['object_state']);
+  $foxml->ingest();
+}
+
+/**
+ *
+ * Remove the inverse RDF from object to subject and remove the
+ * subject title from the object datastream when appropriate.
+ * Note that $rdf_relationship is not passed by reference in
+ * this instance because the original arrays might no longer
+ * exist by the time this batch operation is called.
+ *
+ * @param string $subjectPid
+ *   The Persistent Identifier of the subject component the RDF
+ * @param string $objectPid
+ *   The Persistent Identifier of the object component the RDF
+ * @param array $rdf_relationship
+ *   Corresponds to a single RDF-autocomplete associated with an XML-form.
+ * @param string $rdfNamespace
+ *   The namespace of the predicate component in the inverse RDF
+ * @param string $inverseName
+ *   The verb of the predicate component in the inverse RDF
+ * @param int $linkTypeOutwardAndInverse
+ *   Constant for link type that is subject to object and object to subject
+ * @param string $context
+ *   Required for batch processing
+ * return
+ *   None
+ */
+
+function remove_inverse_rdf_batch($subjectPid, $objectPid, $rdf_relationship, $rdfNamespace, $inverseName, $subjectDCTitle, &$context) {
+  module_load_include('inc', 'fedora_repository', 'api/tuque');
+  $object = islandora_object_load($objectPid);
+  if ($object) {
+    $object->relationships->remove($rdfNamespace, $inverseName, $subjectPid);
+    // Check if inverse-object-symmetric datastream processing
+    // is required.
+    if ($rdf_relationship['symmetry_in_object_datastream_required'] && strlen($rdf_relationship['object_xpath_data_search']) > 0) {
+      remove_from_datastream($rdf_relationship, $objectPid, $rdf_relationship['object_xpath_data_search'], $rdf_relationship['object_xpath_data_build_countback'], $subjectDCTitle);
+    }
+  }
+  else {
+    $context['results']['errorFlag'] = 1;
+    $context['results']['currentPid'] = $subjectPid;
+  }
+}
+
+/**
+ *
+ * Replace the data in an xml element of a datastream as a
+ * batch operation.
+ * Note that $rdf_relationship and $link are not passed by
+ * reference in this instance because the original arrays
+ * might no longer exist by the time this batch operation
+ * is called.
+ *
+ * @param array $rdf_relationship
+ *   Corresponds to a single RDF-autocomplete associated with an XML-form.
+ * @param string $objectPid
+ *   The Persistent Identifier of the object in which the datastream
+ *   is to be updated
+ * @param string $targetData
+ *   Contains the target data in the datastream
+ * @param string $replacementData
+ *   Contains the replacement data for the datastream
+ * @param string $context
+ *   Required for batch processing
+ * return
+ *   None
+ */
+
+function replace_text_in_datastream_batch($rdf_relationship, $objectPid, $targetData, $replacementData, &$context) {
+  replace_text_in_datastream($rdf_relationship, $objectPid, $rdf_relationship['object_xpath_data_search'], $targetData, $replacementData);
+}
+
+/**
+ *
+ * Create RDF links between subject-objects and object-objects 
+ * as a batch operation.
+ * Note that $rdf_relationship and $link are not passed by
+ * reference in this instance because the original arrays
+ * might no longer exist by the time this batch operation
+ * is called.
+ *
+ * @param array $rdf_relationship
+ *   Corresponds to a single RDF-autocomplete associated with an XML-form.
+ * @param string $subjectPid
+ *   The Persistent Identifier of the subject-object in the RDF
+ * @param string $objectPid
+ *   The Persistent Identifier of the object-object in the RDF
+ * @param string $rdfName
+ *   The verb of the predicate component in the RDF
+ * @param string $rdfNamespace
+ *   The stem of the predicate component in the RDF
+ * @param string $inverseName
+ *   The verb of the predicate component in the inverse RDF
+ * @param string $inversePredicate
+ *   The inverse of the predicate associated with the subject-object
+ * @param boolean $editFlag
+ *   Indicates whether the subject-object is being edited.
+ * @param string $subjectDCTitle
+ *   Contains the title of the subject object prior 
+ *   to the XML form being edited by the user.
+ * @param string $postEditSubjectTitle
+ *   Contains the title of the subject object after
+ *   the XML form has been edited by the user.
+ * @param int $linkTypeOutwardOnly
+ *   Constant for link type that is subject to object only
+ * @param int $linkTypeOutwardAndInverse
+ *   Constant for link type that is subject to object and object to subject
+ * @param int $linkTypeInverseOnly
+ *   Constant for link type that is object to subject only
+ * @param string $context
+ *   Required for batch processing
+ * return
+ *   None
+ */
+
+function create_rdf_links_batch($rdf_relationship, $subjectPid, $objectPid, $rdfName, $rdfNamespace, $inverseName, $inversePredicate, $editFlag, $subjectDCTitle, $postEditSubjectTitle, $linkTypeOutwardOnly, $linkTypeOutwardAndInverse, $linkTypeInverseOnly, &$context) {
+  module_load_include('inc', 'fedora_repository', 'api/tuque');
+
+  $subject = islandora_object_load($subjectPid);
+  if ($subject) {
+    // Even when creating a new subject-object, the user could have
+    // added identical entries in multiple fields, so check whether
+    // a link to this object already exists.
+
+    if ($rdf_relationship['link_type'] == $linkTypeOutwardOnly || $rdf_relationship['link_type'] == $linkTypeOutwardAndInverse) {
+      $spoSubject = '<info:fedora/' . $subjectPid . '>';
+      $spoPredicate = '<' . $rdf_relationship['rdf_predicate'] . '>';
+      $spoObject = '<info:fedora/' . $objectPid . '>';
+    }
+    else {
+      // It must be an inverse-only type of link.
+      $spoSubject = '<info:fedora/' . $objectPid . '>';
+      $spoPredicate = '<' . $inversePredicate . '>';
+      $spoObject = '<info:fedora/' . $subjectPid . '>';
+    }
+    $existingObjectTriple = spo_search($spoSubject, $spoPredicate, $spoObject);
+    if (count($existingObjectTriple) == 0) {
+      // Add a subject-to-object RDF.
+      if ($rdf_relationship['link_type'] != $linkTypeInverseOnly) {
+        $subject->relationships->add($rdfNamespace, $rdfName, $objectPid);
+      }
+      if ($rdf_relationship['link_type'] == $linkTypeOutwardAndInverse || $rdf_relationship['link_type'] == $linkTypeInverseOnly) {
+        $object = islandora_object_load($objectPid);
+        if ($object) {
+          // Add an object-to-subject RDF.
+          $object->relationships->add($rdfNamespace, $inverseName, $subjectPid);
+          // Check if symmetric object datastream processing
+          // is required.
+          if ($rdf_relationship['symmetry_in_object_datastream_required'] && strlen($rdf_relationship['object_xpath_data_search']) > 0) {
+            $objectDatastreamID = $rdf_relationship['object_dsid'];
+            $objectDatastream = $object[$objectDatastreamID];
+            $objectDatastreamXml = $objectDatastream->content;
+            if (!(add_to_datastream($rdf_relationship, $objectDatastreamXml, $rdf_relationship['object_xpath_data_search'], $rdf_relationship['object_xpath_data_build'], $rdf_relationship['object_xpath_data_build_countback'], $editFlag ? $postEditSubjectTitle : $subjectDCTitle))) {
+              $context['results']['currentPid'] = $subjectPid;
+              $context['results']['errorFlag'] = 1;
+            }
+            // Update the datastream with the xml containing the added node.
+            $objectDatastream->content = $objectDatastreamXml;
+          }
+        } else {
+          $context['results']['currentPid'] = $subjectPid;
+          $context['results']['errorFlag'] = 1;
+        }
+      }
+    }
+  } else {
+    $context['results']['currentPid'] = $subjectPid;
+    $context['results']['errorFlag'] = 1;
+  }
+}
+
+/**
+ *
+ * The batch processing of RDF links and datastream updates
+ * involving subject-objects and object-objects that is
+ * required as a result of an edit operation being performed.
+ * Note that $rdf_relationship and $link are not passed by
+ * reference in this instance because the original arrays
+ * might no longer exist by the time this batch operation
+ * is called.
+ *
+ * @param array $rdf_relationship
+ *   Corresponds to a single RDF-autocomplete associated with an XML-form.
+ * @param int $rdfRelationshipRdfLinkTot
+ *   The number of links associated with the relationship
+ * @param string $subjectPid
+ *   The Persistent Identifier of the subject-object in the RDF
+ * @param string $objectPid
+ *   The Persistent Identifier of the object-object in the RDF
+ * @param string $rdfName
+ *   The verb of the predicate component in the RDF
+ * @param string $rdfNamespace
+ *   The stem of the predicate component in the RDF
+ * @param string $inverseName
+ *   The verb of the predicate component in the inverse RDF
+ * @param string $inversePredicate
+ *   The inverse of the predicate associated with the subject-object
+ * @param boolean $editFlag
+ *   Indicates whether the subject-object is being edited.
+ * @param string $subjectDCTitle
+ *   Contains the title of the subject object prior 
+ *   to the XML form being edited by the user.
+ * @param string $postEditSubjectTitle
+ *   Contains the title of the subject object after
+ *   the XML form has been edited by the user.
+ * @param int $linkTypeOutwardOnly
+ *   Constant for link type that is subject to object only
+ * @param int $linkTypeOutwardAndInverse
+ *   Constant for link type that is subject to object and object to subject
+ * @param int $linkTypeInverseOnly
+ *   Constant for link type that is object to subject only
+ * @param string $context
+ *   Required for batch processing
+ * return 
+ *   None
+ */
+
+function process_edit_batch($rdf_relationship, $rdfRelationshipRdfLinkTot, $subjectPid, $rdfName, $rdfNamespace, $inverseName, $inversePredicate, $preEditObjectTripleForRelationship, $replaceSubjectTitleInObjectDatastream, $preEditSubjectTitle, $postEditSubjectTitle, $linkTypeOutwardOnly, $linkTypeOutwardAndInverse, $linkTypeInverseOnly, &$context) {
+  module_load_include('inc', 'fedora_repository', 'api/tuque');
+
+  $subject = islandora_object_load($subjectPid);
+  if ($subject) {
+    if ($rdf_relationship['link_type'] == $linkTypeOutwardOnly || $rdf_relationship['link_type'] == $linkTypeOutwardAndInverse) {
+      $preEditPid = $preEditObjectTripleForRelationship['objectPid'];
+    }
+    else {
+      $preEditPid = $preEditObjectTripleForRelationship['subjectPid'];
+    }
+    if (strlen($rdf_relationship['subject_xpath_data_search']) > 0) {
+      // Check whether entries relating to this link have been
+      // removed during the edit.
+      $preEditMatchFound = false;
+      if ($rdfRelationshipRdfLinkTot > 0) {
+        foreach ($rdf_relationship['rdf_link'] as $postEditLink) {
+          if (!strcmp($preEditPid, $postEditLink['pid'])) {
+            $preEditMatchFound = true;
+            break;
+          }
+        }
+      }
+      if (!$preEditMatchFound) {
+        // The current $preEditPid for the object is not present
+        // in the array of links that are required post-edit, so
+        // unwind any links and datastream entries that are
+        // associated with the object.
+        $preEditObject = islandora_object_load($preEditPid);
+        if ($preEditObject) {
+          if ($rdf_relationship['link_type'] != $linkTypeInverseOnly) {
+            $subject->relationships->remove($rdfNamespace, $rdfName, $preEditObject);
+          }
+          if ($rdf_relationship['link_type'] == $linkTypeOutwardAndInverse || $rdf_relationship['link_type'] == $linkTypeInverseOnly) {
+            $preEditObject->relationships->remove($rdfNamespace, $inverseName, $subject);
+          }
+          // Check if inverse-object-symmetric link processing
+          // is involved.
+          if ($rdf_relationship['symmetry_in_object_datastream_required'] && strlen($rdf_relationship['object_xpath_data_search']) > 0) {
+            remove_from_datastream($rdf_relationship, $preEditPid, $rdf_relationship['object_xpath_data_search'], $rdf_relationship['object_xpath_data_build_countback'], $preEditSubjectTitle);
+          }
+        }
+        else {
+          $context['results']['errorFlag'] = 1;
+          $context['results']['currentPid'] = $subjectPid;
+        }
+      }
+    }
+    else {
+      if ($replaceSubjectTitleInObjectDatastream && $rdf_relationship['symmetry_in_object_datastream_required']) {
+        // There is no xml field for the object-title associated with
+        // this link for the subject-object so there is no checking
+        // to be done regarding pre-edit versus post-edit existence.
+        // Therefore the subject-title should be updated where it 
+        // appears in the datastream of the linked object. An example
+        // of such a scenario would be when the title of a
+        // keyword-subject-object is modified and the catalogue records
+        // that point to it to have their keyword entries updated.
+        replace_text_in_datastream($rdf_relationship, $preEditPid, $rdf_relationship['object_xpath_data_search'], $preEditSubjectTitle, $postEditSubjectTitle);
+      }
+    }
+  } else {
+    $context['results']['errorFlag'] = 1;
+    $context['results']['currentPid'] = $subjectPid;
+  }
+}
+
+/**
+  * The final function called by the drupal batch processing
+  * functionality.
+  * @return
+  *   None
+  */
+function completeObjectLinkerBatchProcessing($success, $results, $operations) {
+  if ($results['errorFlag'] == 1) {
+    $msg = 'A linking error occurred while processing the object with the ID ' . $results['currentPid'];
+    drupal_set_message(t($msg));
+  }
+  drupal_set_message($results['msg']);
+  $context['finished'] = 1;
 }
