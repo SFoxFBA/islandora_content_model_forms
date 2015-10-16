@@ -116,6 +116,15 @@ class DeleteObjectFilesForm {
       );
     }
 
+    $form['fba-workflow'] = array(
+      '#type' => 'hidden',
+      '#value' => 'delete',
+    );
+    $form['fba-page'] = array(
+      '#type' => 'hidden',
+      '#value' => 1,
+    );
+
     return $form;
   }
 
@@ -150,6 +159,15 @@ class DeleteObjectFilesForm {
       '#type' => 'submit',
       '#value' => 'Submit',
     );
+    $form['fba-workflow'] = array(
+      '#type' => 'hidden',
+      '#value' => 'delete',
+    );
+    $form['fba-page'] = array(
+      '#type' => 'hidden',
+      '#value' => 2,
+    );
+
     return $form;
   }
 
@@ -190,6 +208,14 @@ class DeleteObjectFilesForm {
     $batch['progressive'] = FALSE;
     batch_process();
 
+    $form['fba-workflow'] = array(
+      '#type' => 'hidden',
+      '#value' => 'delete',
+    );
+    $form['fba-page'] = array(
+      '#type' => 'hidden',
+      '#value' => 3,
+    );
 
     return $form;
   }
@@ -299,7 +325,7 @@ function completeDeleteObjectDatastreamsProcessing($success, $results, $operatio
  * Handles the submission of the manage form.
  *
  */
-function  sidora_batch_delete_form_submit(array $form, array &$form_state) {
+function sidora_batch_delete_form_submit(array $form, array &$form_state) {
   //module_load_include('inc', 'islandora_content_model_forms', 'ManageObjectFilesForm');
   module_load_include('inc', 'fedora_repository', 'api/fedora_item');
 

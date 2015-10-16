@@ -95,6 +95,14 @@ class ManageObjectFilesForm {
       '#type' => 'hidden',
       '#value' => $collection_pid,
     );
+    $form['fba-workflow'] = array(
+      '#type' => 'hidden',
+      '#value' => 'manage',
+    );
+    $form['fba-page'] = array(
+      '#type' => 'hidden',
+      '#value' => 1,
+    );
     $form['submit'] = array(
       '#type' => 'submit',
       '#submit' => array('sidora_batch_manage_form_submit'),
@@ -110,6 +118,15 @@ class ManageObjectFilesForm {
       '#type' => 'markup',
       '#value' => 'CSV all uploaded now<br/>',
     );
+    $form['fba-workflow'] = array(
+      '#type' => 'hidden',
+      '#value' => 'manage',
+    );
+    $form['fba-page'] = array(
+      '#type' => 'hidden',
+      '#value' => 2,
+    );
+
     return $form;
   }
 
