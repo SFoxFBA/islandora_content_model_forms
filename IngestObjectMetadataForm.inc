@@ -255,7 +255,7 @@ class IngestObjectMetadataForm {
   }
 
   /**
-   * Create the second page of the Ingest Object Metadata form.
+   * Create the third page of the Ingest Object Metadata form.
    *
    * @param string $collection_pid
    * @param string $collection_label

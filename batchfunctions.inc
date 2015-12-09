@@ -1,7 +1,5 @@
 <?php
 
-
-
 function tagobjectforcloning($pid, $selectedcollection, $licencepid, $isrootelement, &$context) {
   $fedora_object = islandora_object_load($pid);
   $dtca = $fedora_object['DTCA'];

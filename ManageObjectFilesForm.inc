@@ -87,7 +87,7 @@ class ManageObjectFilesForm {
     module_load_include('inc', 'fedora_repository', 'api/fedora_item');
     $form['markup'] = array(
       '#type' => 'markup',
-      '#value' => 'Click the button above to select the csv files to be added to this dataset.<br/>',
+      '#value' => 'Click the button above to select the csv files to be added to this data-component.<br/>',
     );
     $pidprefix = substr($pid, 0, strpos($pid, ':'));
     $collection_pid = fba_solution_pack_get_cmodel_from_namespace($pidprefix);
@@ -307,7 +307,7 @@ function create_object_datacomponent_datastreams($pid, $objdsid, &$context) {
     $term = trim($vocab_terms[$i]);
     // CSV file has already been validated using the check_vocab_term function, so
     // a vocab pid will be returned for each element in vocab_terms
-    $vocab_terms[$i] = _check_vocab_term(&$term);
+    $vocab_terms_pids[$i] = _check_vocab_term(&$term);
   }
 
   // Processing Third Row of CSV files (units)
@@ -366,7 +366,7 @@ function create_object_datacomponent_datastreams($pid, $objdsid, &$context) {
                   'tp://www.w3.org/2001/XMLSchema-instance" xmlns:dwc="ht' .
                   'tp://rs.tdwg.org/dwc/terms/">';
 
-              $DWC2 = sprintf('<dwc:Taxon><dwc:taxonID></dwc:taxonID><dwc:parentNameUsage></dwc:parentNameUsage><dwc:parentNameUsageID></dwc:parentNameUsageID><dwc:taxonRank></dwc:taxonRank><dwc:scientificName>%s</dwc:scientificName><dwc:scientificNameAuthorship></dwc:scientificNameAuthorship><dwc:namePublishedIn></dwc:namePublishedIn><dwc:nomenclaturalCode></dwc:nomenclaturalCode><dwc:taxonomicStatus></dwc:taxonomicStatus><dwc:vernacularName></dwc:vernacularName><dwc:acceptedNameUsage></dwc:acceptedNameUsage><dwc:acceptedNameUsageID></dwc:acceptedNameUsageID><dwc:originalNameUsage></dwc:originalNameUsage><dwc:originalNameUsageID></dwc:originalNameUsageID><dwc:taxonRemarks></dwc:taxonRemarks><dcterms:modified>%s</dcterms:modified></dwc:Taxon></DarwinRecordSet>', $scientificName, $reccresolrDateTime);
+              $DWC2 = sprintf('<dwc:Taxon><dwc:taxonID></dwc:taxonID><dwc:parentNameUsage></dwc:parentNameUsage><dwc:parentNameUsageID></dwc:parentNameUsageID><dwc:taxonRank></dwc:taxonRank><dwc:scientificName>%s</dwc:scientificName><dwc:scientificNameAuthorship></dwc:scientificNameAuthorship><dwc:namePublishedIn></dwc:namePublishedIn><dwc:nomenclaturalCode></dwc:nomenclaturalCode><dwc:taxonomicStatus></dwc:taxonomicStatus><dwc:vernacularName></dwc:vernacularName><dwc:acceptedNameUsage></dwc:acceptedNameUsage><dwc:acceptedNameUsageID></dwc:acceptedNameUsageID><dwc:originalNameUsage></dwc:originalNameUsage><dwc:originalNameUsageID></dwc:originalNameUsageID><dwc:taxonRemarks>unverified</dwc:taxonRemarks><dcterms:modified>%s</dcterms:modified></dwc:Taxon></DarwinRecordSet>', $scientificName, $reccresolrDateTime);
 
               $DWCDatastream = $DWC1 . $DWC2;
 
@@ -414,10 +414,10 @@ function create_object_datacomponent_datastreams($pid, $objdsid, &$context) {
   $numberofcolumns = count($headers);
   for ($colindex = 0; $colindex < $numberofcolumns; $colindex++) {
     $coldsname = 'COLS' . $dsidnumber . '-' . ($colindex + 1); //+1 as loop starts at 0
-    $paramvocabterm = $paramunit = $paramtaxa = NULL;
+    $paramvocabtermpid = $paramunit = $paramtaxa = NULL;
     $paramheader = $headers[$colindex];
-    if ($vocab_terms[$colindex]) {
-      $paramvocabterm = (string) $vocab_terms[$colindex];
+    if ($vocab_terms_pids[$colindex]) {
+      $paramvocabtermpid = (string) $vocab_terms_pids[$colindex];
     }
     if ($units[$colindex]) {
       $paramunit = (string) $units[$colindex];
@@ -425,7 +425,7 @@ function create_object_datacomponent_datastreams($pid, $objdsid, &$context) {
     if ($taxa[$colindex]) {
       $paramtaxa = $taxa[$colindex];
     }
-    $colsds_content[$coldsname] = _create_column_datastream($colindex, $paramheader, $paramvocabterm, $paramunit, $paramtaxa, $data_array, $pid, $objdsid);
+    $colsds_content[$coldsname] = _create_column_datastream($colindex, $paramheader, $paramvocabtermpid, $paramunit, $paramtaxa, $data_array, $pid, $objdsid);
   }
   //create the COLSxx-y datastreams and the RELS-INT links for the new OBJxx datastream
   $objsrelations = $repo_object[$objdsid]->relationships;

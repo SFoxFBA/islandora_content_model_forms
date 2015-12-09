@@ -69,6 +69,7 @@
     <xsl:apply-templates select="dtca:keyword[@authority='fba taxonomic']"/>
     <xsl:apply-templates select="dtca:keyword[@authority='fba depicts taxon']"/> <!-- Only present for supplementary file datacomponents created via the media form -->
     <xsl:apply-templates select="mo:observedProperty"/> <!-- Only present for the core datacomponents --> 
+    <xsl:apply-templates select="mo:taxonObservedProperty"/> <!-- Only present for the core datacomponents --> 
     <xsl:apply-templates select="dtca:keyword[@authority='fba geographic']"/>
     <xsl:apply-templates select="dtca:relatedParty[@type='personal']"/>
     <xsl:apply-templates select="dtca:relatedParty[@type='corporate']"/>
@@ -152,6 +153,15 @@
     <xsl:if test="$observedProperty"> 
       <dc:subject>
         <xsl:value-of select="$observedProperty"/>
+      </dc:subject>
+    </xsl:if>  
+  </xsl:template> 
+
+  <xsl:template match="mo:taxonObservedProperty">
+    <xsl:variable name="taxonObservedProperty" select="normalize-space(gco:CharacterString)"/>
+    <xsl:if test="$taxonObservedProperty"> 
+      <dc:subject>
+        <xsl:value-of select="$taxonObservedProperty"/>
       </dc:subject>
     </xsl:if>  
   </xsl:template> 

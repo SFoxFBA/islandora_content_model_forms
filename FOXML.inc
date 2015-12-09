@@ -7,6 +7,7 @@
 module_load_include('inc', 'islandora_form_builder', 'Utilities');
 
 class FOXML extends DOMDocument {
+
   const foxml = 'info:fedora/fedora-system:def/foxml#';
   const xlink = 'http://www.w3.org/1999/xlink';
   const xsi = 'http://www.w3.org/2001/XMLSchema-instance';
@@ -15,6 +16,8 @@ class FOXML extends DOMDocument {
   const rdfs = 'http://www.w3.org/2000/01/rdf-schema#';
   const fedora = 'info:fedora/fedora-system:def/relations-external#';
   const dc = 'http://purl.org/dc/elements/1.1/';
+  const dc_terms = 'http://purl.org/dc/terms/';
+  const fba = 'http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/';
   const oai_dc = 'http://www.openarchives.org/OAI/2.0/oai_dc/';
   const fedora_model = 'info:fedora/fedora-system:def/model#';
 
@@ -88,8 +91,8 @@ class FOXML extends DOMDocument {
     $this->createIngestFileDatastreams();
     $this->createPolicy();
     $this->createDocumentDatastream();
-    if($this->dsid != 'DC') {
-       $this->createDublinCoreDatastream();
+    if ($this->dsid != 'DC') {
+      $this->createDublinCoreDatastream();
     }
     $this->createCollectionPolicy();
     $this->createWorkflowStream();
@@ -150,6 +153,11 @@ class FOXML extends DOMDocument {
     $rdf->setAttributeNS(self::xmlns, 'xmlns:dc', self::dc);
     $rdf->setAttributeNS(self::xmlns, 'xmlns:oai_dc', self::oai_dc);
     $rdf->setAttributeNS(self::xmlns, 'xmlns:fedora-model', self::fedora_model);
+    // FBA customisation
+    $rdf->setAttributeNS(self::xmlns, 'xmlns:dc_terms', self::dc_terms);
+    $rdf->setAttributeNS(self::xmlns, 'xmlns:fba', self::fba);
+    // END FBA customisation
+
 
     $rdf_description = $this->createElementNS(self::rdf, 'rdf:Description');
     $rdf_description->setAttributeNS(self::rdf, 'rdf:about', "info:fedora/{$this->pid}");
@@ -208,11 +216,7 @@ class FOXML extends DOMDocument {
   private function createPolicy() {
     $policy_element = $this->getPolicyStreamElement();
     // See if anything wants to change the policy before it is set.
-    drupal_alter('islandora_content_model_forms_policy',
-      $policy_element,
-      $this->pid,
-      $this->collectionPid,
-      $this->contentModelPid);
+    drupal_alter('islandora_content_model_forms_policy', $policy_element, $this->pid, $this->collectionPid, $this->contentModelPid);
 
     if ($policy_element) {
       $datastream = $this->createDatastreamElement('POLICY', 'A', 'X');
@@ -235,7 +239,8 @@ class FOXML extends DOMDocument {
     }
     try {
       $xml = new SimpleXMLElement($policy_stream);
-    } catch (Exception $exception) {
+    }
+    catch (Exception $exception) {
       watchdog(t("Fedora_Repository"), t("Problem getting security policy."), NULL, WATCHDOG_ERROR);
       drupal_set_message(t('Problem getting security policy: @e', array('@e' => $exception->getMessage())), 'error');
       return FALSE;
@@ -356,7 +361,7 @@ class FOXML extends DOMDocument {
    * Creates an xml based datastream by importing the root node from $this->document.
    */
   public function createDocumentDatastream() {
-    if($this->document !== NULL) {
+    if ($this->document !== NULL) {
       $datastream = $this->createDatastreamElement($this->dsid, 'A', 'X');
       $version = $this->createDatastreamVersionElement("{$this->dsid}.0", "{$this->dsid} Record", 'text/xml');
       $content = $this->createDatastreamContentElement();
@@ -395,7 +400,7 @@ class FOXML extends DOMDocument {
    *   Document.
    */
   private function applyTransformation() {
-    if($this->transform !== NULL) {
+    if ($this->transform !== NULL) {
       $xsl = new DOMDocument();
       $xsl->load($this->transform);
       $xslt = new XSLTProcessor();
@@ -435,7 +440,8 @@ class FOXML extends DOMDocument {
           file_delete($file);
         }
       }
-    } catch (exception $exception) {
+    }
+    catch (exception $exception) {
       drupal_set_message(t("Error ingesting object: @e", array('@e' => $exception->getMessage())), 'error');
       watchdog(t("Fedora_Repository"), t("Error ingesting object: @e", array('@e' => $exception->getMessage())), NULL, WATCHDOG_ERROR);
       // TODO is this necessary?

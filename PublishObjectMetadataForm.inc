@@ -14,31 +14,6 @@ module_load_include('inc', 'xml_form_api', 'XMLForm');
  */
 class PublishObjectMetadataForm {
 
-  /**
-   * Get Content Models for the form.
-   *
-   * @param string $collection_pid
-   *
-   * @return array
-   */
-  public function getPotentialContentModels($collection_pid) {
-    if (($collection_policy = CollectionPolicy::loadFromCollection($collection_pid)) === FALSE) {
-      drupal_set_message(t('Unable to load collection policy \'' . $collection_pid . '\'.'));
-      return FALSE;
-    }
-    if (!($content_models = $collection_policy->getContentModels())) {
-      drupal_set_message(t('No content models associated with this collection: !collection_label. Please contact your administrator.', array('!collection_label' => $collection_label)), 'error');
-      return FALSE;
-    }
-    $potential_models = array();
-    foreach ($content_models as $content_model) {
-      $identifier = $content_model->getIdentifier();
-      $name = $content_model->name;
-      $potential_models["$identifier"] = "$name";
-    }
-    return $potential_models;
-  }
-
   public function getFieldsRequiringValidation($pid, $sxmldtca) {
     module_load_include('inc', 'xml_form_builder', 'XMLFormDatabase');
     module_load_include('inc', 'xml_form_api', 'XMLForm');
@@ -288,15 +263,18 @@ class PublishObjectMetadataForm {
       //$frv = $this->getFieldsRequiringValidation($objectpid, $sxmldtca2);
       //test bit ^
       $sxmldtca = simplexml_load_string($dtcadatastream);
-      $sxmlnamespaces = $sxmldtca->getNamespaces(TRUE); //some fields have namespaces, still need to be able to read them
-      foreach ($sxmlnamespaces as $nskey => $ns) {
-        $children = $sxmldtca->children($ns);
-        $$nskey = $children;
-        if ($nskey) {
-          $sxmldtca->registerXPathNamespace($nskey, $ns . '/');
-        }
-        else {
-          $sxmldtca->registerXPathNamespace('nskey', $ns . '/');
+      if ($sxmldtca) {
+        $sxmlnamespaces = $sxmldtca->getNamespaces(TRUE); //some fields have namespaces, still need to be able to read them
+
+        foreach ($sxmlnamespaces as $nskey => $ns) {
+          $children = $sxmldtca->children($ns);
+          $$nskey = $children;
+          if ($nskey) {
+            $sxmldtca->registerXPathNamespace($nskey, $ns . '/');
+          }
+          else {
+            $sxmldtca->registerXPathNamespace('nskey', $ns . '/');
+          }
         }
       }
       $mandatoryfields = $this->getMandatoryFields($objectpid);
@@ -500,10 +478,10 @@ class PublishObjectMetadataForm {
       $object = islandora_object_load($objectpid);
       $rels = $object->relationships;
 
-      $icios = $rels->get('http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/', 'isComponentInputOf');
-      $hdesign = $rels->get('http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/', 'hasDesign');
-      $hprot = $rels->get('http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/', 'hasProtocol');
-      $hdoc = $rels->get('http://fba.org.uk/schemas/fba/fba_rdf/1.0.0/', 'hasDocumentation');
+      $icios = $rels->get(FBA_URI, 'isComponentInputOf');
+      $hdesign = $rels->get(FBA_URI, 'hasDesign');
+      $hprot = $rels->get(FBA_URI, 'hasProtocol');
+      $hdoc = $rels->get(FBA_URI, 'hasDocumentation');
       $scoperelations = array_merge($icios, $hdesign, $hprot, $hdoc);
 
       if (count($scoperelations) > 0) {
@@ -532,13 +510,7 @@ class PublishObjectMetadataForm {
           //We can ignore parent activities for the top level object
           break;
         }
-        if (in_array($rdftocheck, $designrdfs)) {
-          $uri = FBA_URI;
-        }
-        else {
-          $uri = RELS_EXT_URI;
-        }
-        $spoResult = spo_search($subject, '<' . $uri . $rdftocheck . '>', $object);
+        $spoResult = spo_search($subject, '<' . FBA_URI . $rdftocheck . '>', $object);
         if (!is_null($spoResult)) {
           foreach ($spoResult as $sporesultrow) {
             $subjectpid = $sporesultrow[subjectPid];
@@ -606,7 +578,8 @@ class PublishObjectMetadataForm {
     }
     else {
       $currentrelstext .= '<tr class="fbaborderbottom">'
-          . '<td colspan="7"><br/>Some help text to go here to help users complete all the missing things above.<br/></td>'
+          . '<td colspan="7"><br/>If you would like assistance on pre-publication check errors please email'
+          . ' <a href="mailto:dis@fba.org.uk?Subject=Pre-publication%20check%20error%20help">dis@fba.org.uk</a>.<br/></td>'
           . '</tr>';
       if (!$inscopeflag) {
         $currentrelstext .= '<tr class="fbaborderbottom">'
@@ -656,6 +629,25 @@ class PublishObjectMetadataForm {
     return $form;
   }
 
+  function get_licence_for_user() {
+    global $user;
+    switch ($user->name) {
+      case 'syngdata' :
+      case 'fbadata' :
+      case 'MHaft' :
+      case 'GRushworth' :
+      case 'SFox' :
+      case 'NBywell' : {
+          $licencepid = 'fbalicence:2';
+          break;
+        }
+      default : {
+          $licencepid = 'fbalicence:1';
+        }
+    }
+    return $licencepid;
+  }
+
   function list_available_publication_collections($pid) {
     global $user;
     $remainingrels = array();
@@ -680,6 +672,11 @@ class PublishObjectMetadataForm {
           $remainingrels[] = 'fbads:collection';
           break;
         }
+      case 'syngdata': {
+          $remainingrels[] = 'syngds:collection';
+          break;
+        }
+
       default : {
           $remainingrels[] = NULL;
         }
@@ -781,7 +778,7 @@ class PublishObjectMetadataForm {
     $selectedpid = $form_state['values']['pidtopublish'];
     $licenceprivacytext .= $selectedpid . ' has been chosen for publishing to ' . $selectedcollname . '.<br/><br/>';
 
-    $licencepid = 'fbalicence:1';
+    $licencepid = $this->get_licence_for_user();
 
     $fedora_object = islandora_object_load($licencepid);
     $licence = $fedora_object['LICENCE'];
@@ -1255,7 +1252,7 @@ class PublishObjectMetadataForm {
 
     $query = 'select ?subject where {';
     foreach ($conceptrdfs as $key => $keyvalue) {
-      $query .= '{?subject <info:fedora/fedora-system:def/relations-external#' . $keyvalue . '> <info:fedora/' . $pid . '>}';
+      $query .= '{?subject <' . FBA_URI . $keyvalue . '> <info:fedora/' . $pid . '>}';
       if ($key < $arraycount - 1) { //as arraycounts don't start at zero
         $query .= ' UNION ';
       }
@@ -1279,7 +1276,7 @@ class PublishObjectMetadataForm {
 
     $query = 'select ?object where {';
     foreach ($resourcerdfs as $key => $keyvalue) {
-      $query .= '{<info:fedora/' . $pid . '> <info:fedora/fedora-system:def/relations-external#' . $keyvalue . '> ?object}';
+      $query .= '{<info:fedora/' . $pid . '> <' . FBA_URI . $keyvalue . '> ?object}';
       if ($key < $arraycount - 1) { //as arraycounts don't start at zero
         $query .= ' UNION ';
       }
@@ -1359,3 +1356,5 @@ class PublishObjectMetadataForm {
   }
 
 }
+
+
